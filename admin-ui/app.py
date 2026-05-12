@@ -321,6 +321,71 @@ def git_message(ref: str) -> str:
     return git_value(["log", "-1", "--pretty=format:%h %s", ref], "")
 
 
+GENERATED_LOCAL_FILES = {"nginx/default.conf"}
+
+
+def git_dirty_paths() -> list[str]:
+    result = run_git(["status", "--porcelain"], timeout=30)
+    if result["returncode"] != 0:
+        return []
+    paths: list[str] = []
+    for raw in (result.get("stdout") or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if " -> " in line:
+            line = line.split(" -> ", 1)[1]
+        paths.append(line[3:] if len(line) > 3 else line)
+    return paths
+
+
+def backup_generated_files(paths: list[str]) -> dict[str, str]:
+    backups: dict[str, str] = {}
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    for rel in paths:
+        if rel not in GENERATED_LOCAL_FILES:
+            continue
+        src = PROJECT_ROOT / rel
+        if not src.exists():
+            continue
+        backup = src.with_name(f"{src.name}.local-{stamp}.bak")
+        backup.write_bytes(src.read_bytes())
+        backups[rel] = str(backup)
+    return backups
+
+
+def parse_stack_env() -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not ENV_FILE.exists():
+        return out
+    for raw in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            value = value[1:-1].replace('\\"', '"')
+        out[key.strip()] = value
+    return out
+
+
+def regenerate_nginx_config() -> dict[str, Any]:
+    env = parse_stack_env()
+    domain = env.get("DOMAIN", "").strip()
+    ssl = bool(domain and (PROJECT_ROOT / "certbot" / "conf" / "live" / domain / "fullchain.pem").exists())
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+        from install_wizard import nginx_conf
+
+        target = PROJECT_ROOT / "nginx" / "default.conf"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(nginx_conf(domain, ssl=ssl), encoding="utf-8")
+        return {"ok": True, "domain": domain, "ssl": ssl, "path": str(target)}
+    except Exception as exc:
+        return {"ok": False, "domain": domain, "ssl": ssl, "error": str(exc)}
+
+
 def git_update_status(fetch: bool = True) -> dict[str, Any]:
     if not (PROJECT_ROOT / ".git").exists():
         return {"configured": False, "error": "This stack is not installed from a git repository."}
@@ -329,7 +394,10 @@ def git_update_status(fetch: bool = True) -> dict[str, Any]:
     remote = git_value(["remote", "get-url", "origin"], "")
     current = git_value(["rev-parse", "HEAD"], "")
     current_short = git_value(["rev-parse", "--short", "HEAD"], "")
-    dirty = bool(git_value(["status", "--porcelain"], ""))
+    dirty_paths = git_dirty_paths()
+    generated_dirty_paths = [path for path in dirty_paths if path in GENERATED_LOCAL_FILES]
+    blocking_dirty_paths = [path for path in dirty_paths if path not in GENERATED_LOCAL_FILES]
+    dirty = bool(blocking_dirty_paths)
 
     remote_ref = f"origin/{branch}" if branch and branch != "HEAD" else "origin/main"
     fetch_error = ""
@@ -366,6 +434,8 @@ def git_update_status(fetch: bool = True) -> dict[str, Any]:
         "behind": behind_count,
         "ahead": ahead_count,
         "dirty": dirty,
+        "dirty_paths": blocking_dirty_paths,
+        "generated_dirty_paths": generated_dirty_paths,
         "has_update": behind_count > 0,
         "can_update": behind_count > 0 and ahead_count == 0 and not dirty and not bool(fetch_error),
         "fetch_error": fetch_error,
@@ -385,7 +455,8 @@ def update_worker(job_id: str) -> None:
         mark(status="error", step="failed", error=status.get("error", "git repository is not configured"), finished_at=int(time.time()))
         return
     if status.get("dirty"):
-        mark(status="error", step="failed", error="Local files have uncommitted changes. Commit or stash them before updating.", finished_at=int(time.time()))
+        dirty = ", ".join(status.get("dirty_paths") or [])
+        mark(status="error", step="failed", error=f"Local files have uncommitted changes: {dirty}. Commit or stash them before updating.", finished_at=int(time.time()))
         return
     if status.get("ahead"):
         mark(status="error", step="failed", error="Local branch has commits that are not on origin; fast-forward update is not safe.", finished_at=int(time.time()))
@@ -398,12 +469,30 @@ def update_worker(job_id: str) -> None:
         return
 
     branch = status.get("branch") if status.get("branch") != "HEAD" else "main"
+    generated_dirty = status.get("generated_dirty_paths") or []
+    if generated_dirty:
+        mark(step="preparing-generated-config", generated_dirty_paths=generated_dirty)
+        backups = backup_generated_files(generated_dirty)
+        restore = run_git(["restore", "--"] + list(generated_dirty), timeout=30)
+        mark(generated_backups=backups, generated_restore=restore)
+        if restore["returncode"] != 0:
+            mark(status="error", step="failed", error=clean_output(restore), finished_at=int(time.time()))
+            return
+
     mark(step="downloading")
     pull = run_git(["pull", "--ff-only", "origin", branch], timeout=180)
     mark(pull=pull)
     if pull["returncode"] != 0:
         mark(status="error", step="failed", error=clean_output(pull), finished_at=int(time.time()))
         return
+
+    if generated_dirty:
+        mark(step="regenerating-nginx")
+        nginx_result = regenerate_nginx_config()
+        mark(nginx=nginx_result)
+        if not nginx_result.get("ok"):
+            mark(status="error", step="failed", error=nginx_result.get("error", "Could not regenerate nginx/default.conf"), finished_at=int(time.time()))
+            return
 
     mark(step="restarting")
     compose = run_compose_up_sequential(timeout=900)

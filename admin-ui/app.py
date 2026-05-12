@@ -39,7 +39,7 @@ serializer = URLSafeTimedSerializer(SECRET_KEY, salt="local-ai-admin-session")
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
-app = FastAPI(title="Local AI Stack Admin", version="3.1.0")
+app = FastAPI(title="Local AI Stack Admin", version="3.2.0")
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 jobs: dict[str, dict[str, Any]] = {}
 
@@ -130,12 +130,130 @@ def env_write(values: dict[str, Any]) -> None:
 
 
 def run_cmd(cmd: list[str], timeout: int = 60) -> dict[str, Any]:
-    proc = subprocess.run(cmd, cwd=PROJECT_ROOT, text=True, capture_output=True, timeout=timeout)
-    return {"cmd": cmd, "returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
+    try:
+        proc = subprocess.run(cmd, cwd=PROJECT_ROOT, text=True, capture_output=True, timeout=timeout)
+        return {"cmd": cmd, "returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
+    except FileNotFoundError as exc:
+        return {"cmd": cmd, "returncode": 127, "stdout": "", "stderr": str(exc)}
+    except subprocess.TimeoutExpired as exc:
+        return {"cmd": cmd, "returncode": 124, "stdout": exc.stdout or "", "stderr": exc.stderr or f"Command timed out after {timeout}s"}
 
 
 def run_compose(args: list[str], timeout: int = 60) -> dict[str, Any]:
     return run_cmd(["docker", "compose"] + args, timeout=timeout)
+
+
+def run_git(args: list[str], timeout: int = 30) -> dict[str, Any]:
+    return run_cmd(["git", "-c", f"safe.directory={PROJECT_ROOT}"] + args, timeout=timeout)
+
+
+def clean_output(result: dict[str, Any]) -> str:
+    return ((result.get("stdout") or "") + (result.get("stderr") or "")).strip()
+
+
+def git_value(args: list[str], default: str = "", timeout: int = 30) -> str:
+    result = run_git(args, timeout=timeout)
+    if result["returncode"] != 0:
+        return default
+    return (result["stdout"] or "").strip()
+
+
+def git_message(ref: str) -> str:
+    return git_value(["log", "-1", "--pretty=format:%h %s", ref], "")
+
+
+def git_update_status(fetch: bool = True) -> dict[str, Any]:
+    if not (PROJECT_ROOT / ".git").exists():
+        return {"configured": False, "error": "This stack is not installed from a git repository."}
+
+    branch = git_value(["rev-parse", "--abbrev-ref", "HEAD"], "main")
+    remote = git_value(["remote", "get-url", "origin"], "")
+    current = git_value(["rev-parse", "HEAD"], "")
+    current_short = git_value(["rev-parse", "--short", "HEAD"], "")
+    dirty = bool(git_value(["status", "--porcelain"], ""))
+
+    remote_ref = f"origin/{branch}" if branch and branch != "HEAD" else "origin/main"
+    fetch_error = ""
+    if fetch:
+        fetch_result = run_git(["fetch", "--quiet", "origin", branch if branch != "HEAD" else "main"], timeout=90)
+        if fetch_result["returncode"] != 0:
+            fetch_error = clean_output(fetch_result)
+
+    latest = git_value(["rev-parse", remote_ref], "")
+    latest_short = git_value(["rev-parse", "--short", remote_ref], "")
+    behind = git_value(["rev-list", "--count", f"{current}..{remote_ref}"], "0") if current and latest else "0"
+    ahead = git_value(["rev-list", "--count", f"{remote_ref}..{current}"], "0") if current and latest else "0"
+
+    try:
+        behind_count = int(behind or 0)
+    except ValueError:
+        behind_count = 0
+    try:
+        ahead_count = int(ahead or 0)
+    except ValueError:
+        ahead_count = 0
+
+    return {
+        "configured": True,
+        "branch": branch,
+        "remote": remote,
+        "remote_ref": remote_ref,
+        "current": current,
+        "current_short": current_short,
+        "current_message": git_message("HEAD"),
+        "latest": latest,
+        "latest_short": latest_short,
+        "latest_message": git_message(remote_ref) if latest else "",
+        "behind": behind_count,
+        "ahead": ahead_count,
+        "dirty": dirty,
+        "has_update": behind_count > 0,
+        "can_update": behind_count > 0 and ahead_count == 0 and not dirty and not bool(fetch_error),
+        "fetch_error": fetch_error,
+        "checked_at": int(time.time()),
+    }
+
+
+def update_worker(job_id: str) -> None:
+    def mark(**data: Any) -> None:
+        jobs[job_id].update(data)
+
+    mark(status="running", step="checking", started_at=int(time.time()))
+    status = git_update_status(fetch=True)
+    mark(status_data=status)
+
+    if not status.get("configured"):
+        mark(status="error", step="failed", error=status.get("error", "git repository is not configured"), finished_at=int(time.time()))
+        return
+    if status.get("dirty"):
+        mark(status="error", step="failed", error="Local files have uncommitted changes. Commit or stash them before updating.", finished_at=int(time.time()))
+        return
+    if status.get("ahead"):
+        mark(status="error", step="failed", error="Local branch has commits that are not on origin; fast-forward update is not safe.", finished_at=int(time.time()))
+        return
+    if status.get("fetch_error"):
+        mark(status="error", step="failed", error=status["fetch_error"], finished_at=int(time.time()))
+        return
+    if not status.get("has_update"):
+        mark(status="done", step="already-current", message="Already on the latest version.", finished_at=int(time.time()))
+        return
+
+    branch = status.get("branch") if status.get("branch") != "HEAD" else "main"
+    mark(step="downloading")
+    pull = run_git(["pull", "--ff-only", "origin", branch], timeout=180)
+    mark(pull=pull)
+    if pull["returncode"] != 0:
+        mark(status="error", step="failed", error=clean_output(pull), finished_at=int(time.time()))
+        return
+
+    mark(step="restarting")
+    compose = run_compose(["up", "-d", "--build"], timeout=900)
+    mark(compose=compose)
+    if compose["returncode"] != 0:
+        mark(status="error", step="failed", error=clean_output(compose), finished_at=int(time.time()))
+        return
+
+    mark(status="done", step="complete", finished_at=int(time.time()), status_data=git_update_status(fetch=False))
 
 
 def token_gateway_headers() -> dict[str, str]:
@@ -300,6 +418,24 @@ def api_stack_action(action: str, _: User = Depends(current_user)):
     actions = {"start": ["up", "-d", "--build"], "stop": ["stop"], "restart": ["restart"], "down": ["down"], "status": ["ps"]}
     if action not in actions: raise HTTPException(status_code=400, detail="unknown action")
     return run_compose(actions[action], timeout=180)
+
+@app.get("/api/update/status")
+def api_update_status(fetch: bool = True, _: User = Depends(current_user)):
+    return git_update_status(fetch=fetch)
+
+@app.post("/api/update/apply")
+def api_update_apply(_: User = Depends(current_user)):
+    job_id = secrets.token_hex(8)
+    jobs[job_id] = {"type": "stack-update", "status": "queued", "step": "queued", "created_at": int(time.time())}
+    threading.Thread(target=update_worker, args=(job_id,), daemon=True).start()
+    return {"ok": True, "job_id": job_id}
+
+@app.get("/api/update/jobs/{job_id}")
+def api_update_job(job_id: str, _: User = Depends(current_user)):
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return job
 
 @app.get("/api/logs/{service}")
 def api_logs(service: str, tail: int = 200, _: User = Depends(current_user)):

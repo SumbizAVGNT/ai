@@ -1,13 +1,195 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local AI Stack Admin</title><link rel="stylesheet" href="/static/style.css"></head>
-<body><div class="bg-orb one"></div><div class="bg-orb two"></div><div class="bg-grid"></div>
-<section id="login" class="login-card hidden"><div class="mascot">☾</div><h1>Local AI Stack</h1><p class="muted">Anime admin panel</p><input id="login-user" placeholder="Логин" value="admin"><input id="login-pass" type="password" placeholder="Пароль"><button onclick="login()">Войти ✦</button><p id="login-error" class="error"></p></section>
-<section id="dash" class="hidden"><aside class="sidebar"><div class="brand"><span>🌸</span><b>AI Admin</b></div><button class="nav active" data-tab="overview">Обзор</button><button class="nav" data-tab="tokens">Токены</button><button class="nav" data-tab="users">Пользователи</button><button class="nav" data-tab="models">Модели</button><button class="nav" data-tab="settings">Llama / Prompt</button><button class="nav" data-tab="clients">Clients</button><button class="nav" data-tab="logs">Логи</button><button class="danger" onclick="stack('restart')">Restart stack</button><button onclick="logout()">Выйти</button></aside><section class="content"><header class="topbar"><div><h2 id="title">Обзор</h2><p class="muted">btop-like monitoring, speeds and ETA</p></div><div class="pill" id="user-pill">admin</div></header>
-<div id="tab-overview" class="tab"><div class="grid cards"><div class="card"><span>CPU</span><b id="cpu">...</b></div><div class="card"><span>RAM</span><b id="ram">...</b></div><div class="card"><span>Prompt tok/s</span><b id="prompt-speed">...</b></div><div class="card"><span>ETA last prompt</span><b id="eta">...</b></div></div><div class="panel"><h3>Containers</h3><div id="containers"></div></div></div>
-<div id="tab-tokens" class="tab hidden"><div class="panel formline"><input id="tok-name" placeholder="Имя токена"><input id="tok-limit" placeholder="Лимит токенов"><label><input id="tok-unlimited" type="checkbox" checked> Безлимит</label><button onclick="createToken()">Создать</button></div><div class="panel"><h3>Токены и расходы</h3><div id="tokens-list"></div></div></div>
-<div id="tab-users" class="tab hidden"><div class="panel formline"><input id="new-user" placeholder="Логин"><input id="new-pass" placeholder="Пароль"><button onclick="createUser()">Создать</button></div><div class="panel"><h3>Пользователи</h3><div id="users-list"></div></div></div>
-<div id="tab-models" class="tab hidden"><div class="grid two"><div class="panel"><h3>Local GGUF</h3><div id="models-local"></div></div><div class="panel"><h3>HuggingFace</h3><input id="hf-repo" placeholder="Repo"><input id="hf-include" placeholder="Include"><input id="hf-dir" placeholder="Local dir"><button onclick="downloadModel()">Скачать</button><pre id="jobs"></pre></div></div><div class="panel drop"><h3>Drag & drop GGUF</h3><p>Перетащи .gguf или выбери файл</p><input type="file" accept=".gguf" onchange="uploadModel(this.files[0])"></div></div>
-<div id="tab-settings" class="tab hidden"><div class="grid two"><div class="panel"><h3>System prompt</h3><textarea id="prompt" rows="10"></textarea><button onclick="saveSettings()">Сохранить</button></div><div class="panel"><h3>llama.cpp args</h3><input id="CTX_SIZE" placeholder="-c"><input id="THREADS" placeholder="-t"><input id="PARALLEL_SLOTS" placeholder="-np"><input id="N_GPU_LAYERS" placeholder="--n-gpu-layers"><input id="LLAMA_TIMEOUT" placeholder="--timeout"><button onclick="saveSettings(true)">Сохранить и restart</button></div></div></div>
-<div id="tab-clients" class="tab hidden"><div class="panel"><h3>Clients</h3><div id="clients"></div></div></div>
-<div id="tab-logs" class="tab hidden"><div class="panel formline"><select id="log-service"><option>llama-server-coder</option><option>token-gateway</option><option>nginx</option><option>admin-ui</option></select><button onclick="loadLogs()">Обновить</button></div><pre id="logs" class="logs"></pre></div>
-</section></section><script src="/static/app.js"></script></body></html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Local AI Stack Admin</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="bg-grid"></div>
+
+  <section id="login" class="login-card hidden">
+    <div class="brand-mark">AI</div>
+    <h1>Local AI Stack</h1>
+    <p class="muted">Admin panel</p>
+    <input id="login-user" placeholder="Логин" value="admin" autocomplete="username">
+    <input id="login-pass" type="password" placeholder="Пароль" autocomplete="current-password">
+    <button onclick="login()">Войти</button>
+    <p id="login-error" class="error"></p>
+  </section>
+
+  <section id="dash" class="hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <b>AI Admin</b>
+      </div>
+      <button class="nav active" data-tab="overview">Обзор</button>
+      <button class="nav" data-tab="tokens">Токены</button>
+      <button class="nav" data-tab="users">Пользователи</button>
+      <button class="nav" data-tab="models">Модели</button>
+      <button class="nav" data-tab="settings">Llama / Prompt</button>
+      <button class="nav" data-tab="clients">Clients</button>
+      <button class="nav" data-tab="updates">Updates <span id="update-dot" class="nav-dot hidden"></span></button>
+      <button class="nav" data-tab="logs">Логи</button>
+      <button class="danger" onclick="stack('restart')">Restart stack</button>
+      <button onclick="logout()">Выйти</button>
+    </aside>
+
+    <section class="content">
+      <header class="topbar">
+        <div>
+          <h2 id="title">Обзор</h2>
+          <p class="muted">Мониторинг, модели, токены и обновления стека</p>
+        </div>
+        <div class="pill" id="user-pill">admin</div>
+      </header>
+
+      <div id="tab-overview" class="tab">
+        <div class="grid cards">
+          <div class="card"><span>CPU</span><b id="cpu">...</b></div>
+          <div class="card"><span>RAM</span><b id="ram">...</b></div>
+          <div class="card"><span>Prompt tok/s</span><b id="prompt-speed">...</b></div>
+          <div class="card"><span>ETA last prompt</span><b id="eta">...</b></div>
+        </div>
+        <div class="grid two">
+          <div class="panel">
+            <h3>Containers</h3>
+            <div id="containers"></div>
+          </div>
+          <div class="panel update-compact">
+            <div class="panel-head">
+              <h3>Updates</h3>
+              <button class="secondary small" onclick="loadUpdate(true)">Проверить</button>
+            </div>
+            <div id="update-mini" class="update-mini muted">Проверка версии...</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-tokens" class="tab hidden">
+        <div class="panel formline">
+          <input id="tok-name" placeholder="Имя токена">
+          <input id="tok-limit" placeholder="Лимит токенов">
+          <label><input id="tok-unlimited" type="checkbox" checked> Безлимит</label>
+          <button onclick="createToken()">Создать</button>
+        </div>
+        <div class="panel">
+          <h3>Токены и расходы</h3>
+          <div id="tokens-list"></div>
+        </div>
+      </div>
+
+      <div id="tab-users" class="tab hidden">
+        <div class="panel formline">
+          <input id="new-user" placeholder="Логин">
+          <input id="new-pass" placeholder="Пароль">
+          <button onclick="createUser()">Создать</button>
+        </div>
+        <div class="panel">
+          <h3>Пользователи</h3>
+          <div id="users-list"></div>
+        </div>
+      </div>
+
+      <div id="tab-models" class="tab hidden">
+        <div class="grid two">
+          <div class="panel">
+            <h3>Local GGUF</h3>
+            <div id="models-local"></div>
+          </div>
+          <div class="panel">
+            <h3>HuggingFace</h3>
+            <input id="hf-repo" placeholder="Repo">
+            <input id="hf-include" placeholder="Include">
+            <input id="hf-dir" placeholder="Local dir">
+            <button onclick="downloadModel()">Скачать</button>
+            <pre id="jobs"></pre>
+          </div>
+        </div>
+        <div class="panel drop">
+          <h3>Drag & drop GGUF</h3>
+          <p>Перетащи .gguf или выбери файл</p>
+          <input type="file" accept=".gguf" onchange="uploadModel(this.files[0])">
+        </div>
+      </div>
+
+      <div id="tab-settings" class="tab hidden">
+        <div class="grid two">
+          <div class="panel">
+            <h3>System prompt</h3>
+            <textarea id="prompt" rows="10"></textarea>
+            <button onclick="saveSettings()">Сохранить</button>
+          </div>
+          <div class="panel">
+            <h3>llama.cpp args</h3>
+            <input id="CTX_SIZE" placeholder="-c">
+            <input id="THREADS" placeholder="-t">
+            <input id="PARALLEL_SLOTS" placeholder="-np">
+            <input id="N_GPU_LAYERS" placeholder="--n-gpu-layers">
+            <input id="LLAMA_TIMEOUT" placeholder="--timeout">
+            <button onclick="saveSettings(true)">Сохранить и restart</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="tab-clients" class="tab hidden">
+        <div class="panel">
+          <h3>Clients</h3>
+          <div id="clients"></div>
+        </div>
+      </div>
+
+      <div id="tab-updates" class="tab hidden">
+        <div class="panel update-panel">
+          <div class="update-hero">
+            <div>
+              <span id="update-state" class="status-badge">Проверка</span>
+              <h3 id="update-title">Проверка обновлений</h3>
+              <p id="update-copy" class="muted">Сравниваю локальную версию с GitHub.</p>
+            </div>
+            <div class="update-actions">
+              <button class="secondary" onclick="loadUpdate(true)">Проверить</button>
+              <button id="update-apply" onclick="applyUpdate()">Загрузить и перезапустить</button>
+            </div>
+          </div>
+          <div class="version-grid">
+            <div class="version-card">
+              <span>Установлено</span>
+              <b id="update-current">...</b>
+              <small id="update-current-msg">...</small>
+            </div>
+            <div class="version-card">
+              <span>На GitHub</span>
+              <b id="update-latest">...</b>
+              <small id="update-latest-msg">...</small>
+            </div>
+            <div class="version-card">
+              <span>Ветка</span>
+              <b id="update-branch">...</b>
+              <small id="update-remote">...</small>
+            </div>
+          </div>
+          <div id="update-progress" class="progress-box hidden"></div>
+        </div>
+      </div>
+
+      <div id="tab-logs" class="tab hidden">
+        <div class="panel formline">
+          <select id="log-service">
+            <option>llama-server-coder</option>
+            <option>token-gateway</option>
+            <option>nginx</option>
+            <option>admin-ui</option>
+          </select>
+          <button onclick="loadLogs()">Обновить</button>
+        </div>
+        <pre id="logs" class="logs"></pre>
+      </div>
+    </section>
+  </section>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

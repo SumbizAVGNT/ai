@@ -287,14 +287,23 @@ def container_names_for_service(service: str) -> list[str]:
         "admin-ui": ["admin-ui"],
         "nginx": ["local-ai-nginx", "nginx"],
         "certbot": ["local-ai-certbot", "certbot"],
+        "opencode-server": ["opencode-server"],
+        "codex-runner": ["codex-runner"],
+        "claude-code-proxy": ["claude-code-proxy"],
     }.get(service, [])
+
+
+def current_container_id() -> str:
+    try:
+        return Path("/etc/hostname").read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
 
 
 def remove_conflicting_container(service: str) -> dict[str, Any]:
     removed: list[dict[str, str]] = []
     errors: list[str] = []
-    compose_id_result = run_compose(["ps", "-q", service], timeout=20)
-    compose_id = (compose_id_result.get("stdout") or "").strip()
+    current_id = current_container_id()
 
     for name in container_names_for_service(service):
         listed = run_docker(["ps", "-aq", "--filter", f"name=^/{name}$"], timeout=20)
@@ -302,7 +311,7 @@ def remove_conflicting_container(service: str) -> dict[str, Any]:
             errors.append(clean_output(listed))
             continue
         for container_id in [line.strip() for line in (listed.get("stdout") or "").splitlines() if line.strip()]:
-            if compose_id and container_id == compose_id:
+            if service == "admin-ui" and current_id and container_id.startswith(current_id):
                 continue
             result = run_docker(["rm", "-f", container_id], timeout=60)
             if result["returncode"] == 0:
@@ -915,6 +924,7 @@ def api_clients(_: User = Depends(current_user)):
         "opencode": {"enabled": status.get("opencode-server") == "running", "defined": "opencode-server:" in compose, "hint": "OpenCode Desktop connects to opencode serve at http://localhost:4096, model provider points to /v1."},
         "codex": {"enabled": status.get("codex-runner") == "running", "defined": "codex-runner:" in compose, "hint": "Codex helper uses @openai/codex. Configure OPENAI_API_KEY or use your /v1 endpoint if supported by your client."},
         "claude": {"enabled": status.get("claude-code-proxy") == "running", "defined": "claude-code-proxy:" in compose, "hint": "Claude Code proxy is experimental; OpenAI-compatible clients are preferred."},
+        "openrouter": {"enabled": True, "defined": True, "external": True, "hint": "OpenRouter is an external OpenAI-compatible API. No local proxy or container is needed."},
     }
 
 @app.post("/api/clients/{client}/enable")
@@ -933,5 +943,6 @@ def api_enable_client(client: str, _: User = Depends(current_user)):
         enable_result = run_cmd([sys.executable, "scripts/client_manager.py", "enable", client], timeout=30)
         if enable_result["returncode"] != 0:
             return {"ok": False, "service": service, "enable": enable_result, "result": None}
+    remove_conflicting_container(service)
     result = run_compose(args, timeout=600)
     return {"ok": result["returncode"] == 0, "service": service, "enable": enable_result, "result": result}

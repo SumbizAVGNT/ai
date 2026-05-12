@@ -473,19 +473,28 @@ async function loadModelJobs(show = true) {
 
 async function loadClients() {
   const data = await api("/clients");
-  $("#clients-list").innerHTML = Object.entries(data).map(([name, client]) => `
-    <div class="list-row client-row">
-      <div>
-        <strong>${escapeHtml(name)}</strong>
-        <small>${escapeHtml(client.hint || "")}</small>
+  $("#clients-list").innerHTML = Object.entries(data).map(([name, client]) => {
+    const external = Boolean(client.external);
+    const statusClass = external || client.enabled ? "good" : "bad";
+    const statusLabel = external ? "external" : (client.enabled ? "running" : "off");
+    const composeLabel = external ? "no local proxy" : (client.defined ? "defined" : "missing in compose");
+    const action = external
+      ? `<span class="muted small">No action</span>`
+      : `<button class="secondary small" data-action="client-enable" data-client="${escapeHtml(name)}" ${client.enabled ? "disabled" : ""}>
+          ${client.enabled ? "Enabled" : "Enable"}
+        </button>`;
+    return `
+      <div class="list-row client-row">
+        <div>
+          <strong>${escapeHtml(name)}</strong>
+          <small>${escapeHtml(client.hint || "")}</small>
+        </div>
+        <span class="status ${statusClass}">${statusLabel}</span>
+        <span>${composeLabel}</span>
+        ${action}
       </div>
-      <span class="status ${client.enabled ? "good" : "bad"}">${client.enabled ? "running" : "off"}</span>
-      <span>${client.defined ? "defined" : "missing in compose"}</span>
-      <button class="secondary small" data-action="client-enable" data-client="${escapeHtml(name)}" ${client.enabled ? "disabled" : ""}>
-        ${client.enabled ? "Enabled" : "Enable"}
-      </button>
-    </div>
-  `).join("");
+    `;
+  }).join("");
 }
 
 async function enableClient(client) {

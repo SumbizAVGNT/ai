@@ -58,17 +58,17 @@ def container_names_for_service(service):
         "admin-ui": ["admin-ui"],
         "nginx": ["local-ai-nginx", "nginx"],
         "certbot": ["local-ai-certbot", "certbot"],
+        "opencode-server": ["opencode-server"],
+        "codex-runner": ["codex-runner"],
+        "claude-code-proxy": ["claude-code-proxy"],
     }.get(service, [])
 
 
 def remove_conflicting_container(service):
-    compose_id = run_capture(["docker", "compose", "ps", "-q", service], env=compose_env()).stdout.strip()
     for name in container_names_for_service(service):
         result = run_capture(["docker", "ps", "-aq", "--filter", f"name=^/{name}$"])
         for container_id in [line.strip() for line in result.stdout.splitlines() if line.strip()]:
-            if compose_id and container_id == compose_id:
-                continue
-            print(f"Removing old conflicting container {name} ({container_id}) before starting {service}...")
+            print(f"Removing existing stack container {name} ({container_id}) before starting {service}...")
             run(["docker", "rm", "-f", container_id], check=False)
 
 

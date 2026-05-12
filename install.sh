@@ -97,21 +97,16 @@ container_names_for_service() {
 
 remove_conflicting_container() {
   local svc="$1"
-  local compose_id=""
   local name=""
   local ids=()
   local id=""
 
-  compose_id="$(docker compose ps -q "$svc" 2>/dev/null || true)"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     mapfile -t ids < <(docker ps -aq --filter "name=^/${name}$" 2>/dev/null || true)
     for id in "${ids[@]}"; do
       [ -n "$id" ] || continue
-      if [ -n "$compose_id" ] && [ "$id" = "$compose_id" ]; then
-        continue
-      fi
-      echo "Removing old conflicting container $name ($id) before starting $svc..."
+      echo "Removing existing stack container $name ($id) before starting $svc..."
       docker rm -f "$id" >/dev/null
     done
   done < <(container_names_for_service "$svc")

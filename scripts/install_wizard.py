@@ -97,13 +97,22 @@ def explain_compose_failure(result):
 
 def check_admin_panel():
     print("\nChecking admin-ui...")
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:8088/ui/", timeout=8) as resp:
-            if 200 <= resp.status < 400:
-                print("admin-ui ok: http://127.0.0.1:8088/ui/")
-                return True
-    except Exception as exc:
-        print(f"admin-ui is not responding: {exc}")
+    wait_seconds = int(os.getenv("ADMIN_WAIT_SECONDS", "90"))
+    elapsed = 0
+    last_error = ""
+    while elapsed < wait_seconds:
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:8088/ui/", timeout=5) as resp:
+                if 200 <= resp.status < 400:
+                    print("admin-ui ok: http://127.0.0.1:8088/ui/")
+                    return True
+        except Exception as exc:
+            last_error = str(exc)
+        time.sleep(3)
+        elapsed += 3
+        print(f"admin-ui not ready yet ({elapsed}s/{wait_seconds}s)...")
+
+    print(f"admin-ui is not responding: {last_error}")
 
     print("This is what causes nginx 502 Bad Gateway.")
     print("+ docker compose ps")

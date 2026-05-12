@@ -127,12 +127,19 @@ recreate_stack(){ need_docker; compose_up_sequential --force-recreate; }
 
 check_admin_panel() {
   local admin_ok=1
+  local wait_seconds="${ADMIN_WAIT_SECONDS:-90}"
+  local elapsed=0
   echo "Checking admin-ui..."
   if command -v curl >/dev/null 2>&1; then
-    if curl -fsS --max-time 8 http://127.0.0.1:8088/ui/ >/dev/null; then
-      echo "admin-ui ok: http://127.0.0.1:8088/ui/"
-      return 0
-    fi
+    while [ "$elapsed" -lt "$wait_seconds" ]; do
+      if curl -fsS --max-time 5 http://127.0.0.1:8088/ui/ >/dev/null 2>&1; then
+        echo "admin-ui ok: http://127.0.0.1:8088/ui/"
+        return 0
+      fi
+      sleep 3
+      elapsed=$((elapsed + 3))
+      echo "admin-ui not ready yet (${elapsed}s/${wait_seconds}s)..."
+    done
     admin_ok=0
   else
     echo "curl is not installed; skipping HTTP check."

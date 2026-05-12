@@ -542,12 +542,6 @@ function renderUpdate(data) {
     $("#update-copy").textContent = data.fetch_error;
     return;
   }
-  if (data.dirty) {
-    setUpdateState("bad", "Local changes");
-    $("#update-title").textContent = "Update is blocked";
-    $("#update-copy").textContent = "There are uncommitted local changes. Commit or stash them first.";
-    return;
-  }
   if (data.ahead > 0) {
     setUpdateState("warn", "Local branch ahead");
     $("#update-title").textContent = "Manual check required";
@@ -557,13 +551,17 @@ function renderUpdate(data) {
   if (data.has_update) {
     setUpdateState("warn", "Update available");
     $("#update-title").textContent = `New version: ${data.behind} commit(s)`;
-    $("#update-copy").textContent = "Download the latest code from GitHub and rebuild the stack.";
+    $("#update-copy").textContent = data.dirty
+      ? "Local changes will be saved to git stash automatically, then the stack will update and restart."
+      : "Download the latest code from GitHub and rebuild the stack.";
     apply.disabled = !data.can_update;
     return;
   }
   setUpdateState("good", "Up to date");
   $("#update-title").textContent = "Installed version matches GitHub";
-  $("#update-copy").textContent = "No update is available.";
+  $("#update-copy").textContent = data.dirty
+    ? "No update is available. Local changes will be auto-stashed next time an update is applied."
+    : "No update is available.";
 }
 
 async function loadUpdate(fetch = true) {

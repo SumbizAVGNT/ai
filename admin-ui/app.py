@@ -392,18 +392,36 @@ AUTO_RESTORED_LOCAL_FILES = GENERATED_LOCAL_FILES | {"install.sh"}
 
 
 def git_dirty_paths() -> list[str]:
-    result = run_git(["status", "--porcelain"], timeout=30)
+    result = run_git(["status", "--porcelain=v1", "-z"], timeout=30)
     if result["returncode"] != 0:
         return []
     paths: list[str] = []
-    for raw in (result.get("stdout") or "").splitlines():
-        line = raw.strip()
-        if not line:
+    parts = (result.get("stdout") or "").split("\0")
+    i = 0
+    while i < len(parts):
+        entry = parts[i]
+        i += 1
+        if not entry:
             continue
-        if " -> " in line:
-            line = line.split(" -> ", 1)[1]
-        paths.append(line[3:] if len(line) > 3 else line)
+        status = entry[:2]
+        path = entry[3:] if len(entry) > 3 else entry
+        if path:
+            paths.append(path)
+        if "R" in status or "C" in status:
+            i += 1
     return paths
+
+
+def stash_local_changes(paths: list[str]) -> dict[str, Any]:
+    selected = [path for path in paths if path not in AUTO_RESTORED_LOCAL_FILES]
+    if not selected:
+        return {"cmd": ["git", "stash", "push"], "returncode": 0, "stdout": "", "stderr": "", "skipped": True}
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    message = f"local-ai-admin-update-{stamp}"
+    result = run_git(["stash", "push", "-u", "-m", message, "--"] + selected, timeout=120)
+    result["stash_message"] = message
+    result["paths"] = selected
+    return result
 
 
 def backup_generated_files(paths: list[str]) -> dict[str, str]:
@@ -537,10 +555,11 @@ def git_update_status(fetch: bool = True) -> dict[str, Any]:
         "ahead": ahead_count,
         "dirty": dirty,
         "dirty_paths": blocking_dirty_paths,
+        "auto_stash_paths": blocking_dirty_paths,
         "generated_dirty_paths": generated_dirty_paths,
         "auto_restored_paths": auto_restored_paths,
         "has_update": behind_count > 0,
-        "can_update": behind_count > 0 and ahead_count == 0 and not dirty and not bool(fetch_error),
+        "can_update": behind_count > 0 and ahead_count == 0 and not bool(fetch_error),
         "fetch_error": fetch_error,
         "checked_at": int(time.time()),
     }
@@ -557,10 +576,6 @@ def update_worker(job_id: str) -> None:
     if not status.get("configured"):
         mark(status="error", step="failed", error=status.get("error", "git repository is not configured"), finished_at=int(time.time()))
         return
-    if status.get("dirty"):
-        dirty = ", ".join(status.get("dirty_paths") or [])
-        mark(status="error", step="failed", error=f"Local files have uncommitted changes: {dirty}. Commit or stash them before updating.", finished_at=int(time.time()))
-        return
     if status.get("ahead"):
         mark(status="error", step="failed", error="Local branch has commits that are not on origin; fast-forward update is not safe.", finished_at=int(time.time()))
         return
@@ -574,8 +589,17 @@ def update_worker(job_id: str) -> None:
     branch = status.get("branch") if status.get("branch") != "HEAD" else "main"
     auto_restored = status.get("auto_restored_paths") or []
     generated_dirty = status.get("generated_dirty_paths") or []
+    auto_stash = status.get("auto_stash_paths") or []
     backups: dict[str, str] = {}
     previous_compose = ""
+    if auto_stash:
+        mark(step="stashing-local-changes", auto_stash_paths=auto_stash)
+        stash = stash_local_changes(auto_stash)
+        mark(local_stash=stash)
+        if stash["returncode"] != 0:
+            mark(status="error", step="failed", error=clean_output(stash), finished_at=int(time.time()))
+            return
+
     if auto_restored:
         mark(step="preparing-local-files", auto_restored_paths=auto_restored, generated_dirty_paths=generated_dirty)
         backups = backup_generated_files(generated_dirty)

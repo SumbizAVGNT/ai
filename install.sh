@@ -83,6 +83,39 @@ compose_services() {
   done
 }
 
+container_names_for_service() {
+  case "$1" in
+    postgres) printf "%s\n" local-ai-postgres postgres ;;
+    llama-server-coder) printf "%s\n" llama-server-coder ;;
+    token-gateway) printf "%s\n" token-gateway ;;
+    admin-ui) printf "%s\n" admin-ui ;;
+    nginx) printf "%s\n" local-ai-nginx nginx ;;
+    certbot) printf "%s\n" local-ai-certbot certbot ;;
+  esac
+}
+
+remove_conflicting_container() {
+  local svc="$1"
+  local compose_id=""
+  local name=""
+  local ids=()
+  local id=""
+
+  compose_id="$(docker compose ps -q "$svc" 2>/dev/null || true)"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    mapfile -t ids < <(docker ps -aq --filter "name=^/${name}$" 2>/dev/null || true)
+    for id in "${ids[@]}"; do
+      [ -n "$id" ] || continue
+      if [ -n "$compose_id" ] && [ "$id" = "$compose_id" ]; then
+        continue
+      fi
+      echo "Removing old conflicting container $name ($id) before starting $svc..."
+      docker rm -f "$id" >/dev/null
+    done
+  done < <(container_names_for_service "$svc")
+}
+
 compose_up_sequential() {
   local recreate="${1:-}"
   local services=()
@@ -112,6 +145,7 @@ compose_up_sequential() {
   for svc in "${services[@]}"; do
     echo
     echo "== Up $svc =="
+    remove_conflicting_container "$svc"
     if [ "$recreate" = "--force-recreate" ]; then
       retry_compose up -d --no-build --force-recreate "$svc"
     else

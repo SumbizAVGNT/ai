@@ -50,6 +50,28 @@ def compose_services():
     return [service for service in preferred if service in available]
 
 
+def container_names_for_service(service):
+    return {
+        "postgres": ["local-ai-postgres", "postgres"],
+        "llama-server-coder": ["llama-server-coder"],
+        "token-gateway": ["token-gateway"],
+        "admin-ui": ["admin-ui"],
+        "nginx": ["local-ai-nginx", "nginx"],
+        "certbot": ["local-ai-certbot", "certbot"],
+    }.get(service, [])
+
+
+def remove_conflicting_container(service):
+    compose_id = run_capture(["docker", "compose", "ps", "-q", service], env=compose_env()).stdout.strip()
+    for name in container_names_for_service(service):
+        result = run_capture(["docker", "ps", "-aq", "--filter", f"name=^/{name}$"])
+        for container_id in [line.strip() for line in result.stdout.splitlines() if line.strip()]:
+            if compose_id and container_id == compose_id:
+                continue
+            print(f"Removing old conflicting container {name} ({container_id}) before starting {service}...")
+            run(["docker", "rm", "-f", container_id], check=False)
+
+
 def docker_compose_up(args, attempts=3):
     if not args or args[0] != "up":
         return retry_docker_compose(args, attempts=attempts)
@@ -75,6 +97,7 @@ def docker_compose_up(args, attempts=3):
 
     for service in services:
         print(f"\n== Up {service} ==")
+        remove_conflicting_container(service)
         up_args = ["up", "-d", "--no-build"]
         if force_recreate:
             up_args.append("--force-recreate")

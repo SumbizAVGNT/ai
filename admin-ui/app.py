@@ -261,6 +261,40 @@ def compose_services() -> list[str]:
     return [service for service in preferred if service in available]
 
 
+def container_names_for_service(service: str) -> list[str]:
+    return {
+        "postgres": ["local-ai-postgres", "postgres"],
+        "llama-server-coder": ["llama-server-coder"],
+        "token-gateway": ["token-gateway"],
+        "admin-ui": ["admin-ui"],
+        "nginx": ["local-ai-nginx", "nginx"],
+        "certbot": ["local-ai-certbot", "certbot"],
+    }.get(service, [])
+
+
+def remove_conflicting_container(service: str) -> dict[str, Any]:
+    removed: list[dict[str, str]] = []
+    errors: list[str] = []
+    compose_id_result = run_compose(["ps", "-q", service], timeout=20)
+    compose_id = (compose_id_result.get("stdout") or "").strip()
+
+    for name in container_names_for_service(service):
+        listed = run_docker(["ps", "-aq", "--filter", f"name=^/{name}$"], timeout=20)
+        if listed["returncode"] != 0:
+            errors.append(clean_output(listed))
+            continue
+        for container_id in [line.strip() for line in (listed.get("stdout") or "").splitlines() if line.strip()]:
+            if compose_id and container_id == compose_id:
+                continue
+            result = run_docker(["rm", "-f", container_id], timeout=60)
+            if result["returncode"] == 0:
+                removed.append({"name": name, "id": container_id})
+            else:
+                errors.append(clean_output(result))
+
+    return {"service": service, "removed": removed, "errors": errors}
+
+
 def run_compose_up_sequential(force_recreate: bool = False, services: Optional[list[str]] = None, timeout: int = 900) -> dict[str, Any]:
     selected = services or compose_services()
     stdout: list[str] = [f"Starting services one by one (COMPOSE_PARALLEL_LIMIT={compose_env()['COMPOSE_PARALLEL_LIMIT']})\n"]
@@ -289,6 +323,11 @@ def run_compose_up_sequential(force_recreate: bool = False, services: Optional[l
     if last["returncode"] == 0:
         for service in selected:
             stdout.append(f"\n== Up {service} ==\n")
+            cleanup = remove_conflicting_container(service)
+            for item in cleanup["removed"]:
+                stdout.append(f"Removed old conflicting container {item['name']} ({item['id']}) before starting {service}.\n")
+            for error in cleanup["errors"]:
+                stderr.append(error + "\n")
             args = ["up", "-d", "--no-build"]
             if force_recreate:
                 args.append("--force-recreate")

@@ -36,6 +36,7 @@ SECRET_KEY = os.getenv("ADMIN_UI_SECRET", os.getenv("ADMIN_WEB_SECRET", "local-a
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////data/admin.db")
 DEFAULT_ADMIN_USER = os.getenv("ADMIN_UI_USER", os.getenv("ADMIN_WEB_USERNAME", "admin"))
 DEFAULT_ADMIN_PASSWORD = os.getenv("ADMIN_UI_PASSWORD", os.getenv("ADMIN_WEB_PASSWORD", "admin"))
+SYNC_DEFAULT_ADMIN = os.getenv("ADMIN_UI_SYNC_DEFAULT_CREDENTIALS", "1").lower() not in {"0", "false", "no"}
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 BCRYPT_MAX_BYTES = 72
@@ -90,9 +91,26 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         exists = db.execute(select(User).where(User.username == DEFAULT_ADMIN_USER)).scalar_one_or_none()
-        if not exists:
-            db.add(User(username=DEFAULT_ADMIN_USER, password_hash=hash_password(DEFAULT_ADMIN_PASSWORD), is_admin=True, enabled=True))
+        if exists:
+            if SYNC_DEFAULT_ADMIN:
+                exists.password_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
+                exists.is_admin = True
+                exists.enabled = True
+                exists.updated_at = int(time.time())
+                db.commit()
+            return
+
+        first_admin = db.execute(select(User).where(User.is_admin == True).order_by(User.id)).scalars().first()
+        if first_admin and SYNC_DEFAULT_ADMIN:
+            first_admin.username = DEFAULT_ADMIN_USER
+            first_admin.password_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
+            first_admin.enabled = True
+            first_admin.updated_at = int(time.time())
             db.commit()
+            return
+
+        db.add(User(username=DEFAULT_ADMIN_USER, password_hash=hash_password(DEFAULT_ADMIN_PASSWORD), is_admin=True, enabled=True))
+        db.commit()
 
 @app.on_event("startup")
 def startup() -> None:

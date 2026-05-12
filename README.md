@@ -37,7 +37,7 @@ cd local-ai-stack-admin
 ```bash
 ./install.sh             # интерактивное меню 1/2/3...
 ./install.sh install     # интерактивная установка
-./install.sh start       # docker compose up -d --build
+./install.sh start       # pull/build/start core services one by one
 ./install.sh stop        # docker compose stop
 ./install.sh restart     # docker compose restart
 ./install.sh down        # docker compose down

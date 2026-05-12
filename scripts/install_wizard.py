@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, secrets, shutil, subprocess, sys, time
+import json, os, secrets, shutil, subprocess, sys, time, urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,21 +12,76 @@ def run(cmd, check=True, env=None):
     return subprocess.run(list(map(str, cmd)), cwd=str(ROOT), check=check, env=env)
 
 
-def docker_compose_up(args, attempts=3):
+def run_capture(cmd, env=None):
+    return subprocess.run(list(map(str, cmd)), cwd=str(ROOT), text=True, capture_output=True, env=env)
+
+
+def compose_env():
     env = os.environ.copy()
-    env.setdefault("COMPOSE_PARALLEL_LIMIT", "2")
+    env.setdefault("COMPOSE_PARALLEL_LIMIT", "1")
+    return env
+
+
+def retry_docker_compose(args, attempts=3):
+    env = compose_env()
     cmd = ["docker", "compose"] + args
     result = None
 
     for attempt in range(1, attempts + 1):
         if attempts > 1:
-            print(f"\nDocker compose attempt {attempt}/{attempts} (COMPOSE_PARALLEL_LIMIT={env['COMPOSE_PARALLEL_LIMIT']})")
+            print(f"\nDocker compose attempt {attempt}/{attempts}: docker compose {' '.join(map(str, args))}")
         result = run(cmd, check=False, env=env)
         if result.returncode == 0:
             return result
         if attempt < attempts:
             print("Docker compose failed. Waiting 15 seconds before retry...")
             time.sleep(15)
+
+    return result
+
+
+def compose_services():
+    result = run_capture(["docker", "compose", "config", "--services"], env=compose_env())
+    if result.returncode != 0:
+        print(result.stderr.strip())
+        raise RuntimeError("Could not read docker compose services")
+    available = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    preferred = ["postgres", "llama-server-coder", "token-gateway", "admin-ui", "nginx"]
+    return [service for service in preferred if service in available]
+
+
+def docker_compose_up(args, attempts=3):
+    if not args or args[0] != "up":
+        return retry_docker_compose(args, attempts=attempts)
+
+    requested = [arg for arg in args[1:] if not str(arg).startswith("-")]
+    services = requested or compose_services()
+    force_recreate = "--force-recreate" in args
+    result = None
+
+    retry_docker_compose(["stop", "nginx"], attempts=1)
+    print(f"Starting services one by one (COMPOSE_PARALLEL_LIMIT={compose_env()['COMPOSE_PARALLEL_LIMIT']})")
+    for service in services:
+        print(f"\n== Pull {service} ==")
+        result = retry_docker_compose(["pull", "--ignore-buildable", service], attempts=attempts)
+        if result.returncode != 0:
+            return result
+
+    for service in services:
+        print(f"\n== Build {service} ==")
+        result = retry_docker_compose(["build", service], attempts=attempts)
+        if result.returncode != 0:
+            return result
+
+    for service in services:
+        print(f"\n== Up {service} ==")
+        up_args = ["up", "-d", "--no-build"]
+        if force_recreate:
+            up_args.append("--force-recreate")
+        up_args.append(service)
+        result = retry_docker_compose(up_args, attempts=attempts)
+        if result.returncode != 0:
+            return result
 
     return result
 
@@ -38,6 +93,26 @@ def explain_compose_failure(result):
     print("Попробуй позже запустить: ./install.sh start")
     print("Если снова будет TLS handshake timeout, проверь сеть/DNS до Docker Hub и ghcr.io.")
     print(f"Return code: {result.returncode}")
+
+
+def check_admin_panel():
+    print("\nChecking admin-ui...")
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8088/ui/", timeout=8) as resp:
+            if 200 <= resp.status < 400:
+                print("admin-ui ok: http://127.0.0.1:8088/ui/")
+                return True
+    except Exception as exc:
+        print(f"admin-ui is not responding: {exc}")
+
+    print("This is what causes nginx 502 Bad Gateway.")
+    print("+ docker compose ps")
+    subprocess.run(["docker", "compose", "ps"], cwd=str(ROOT), check=False)
+    print("\nRecent admin-ui logs:")
+    subprocess.run(["docker", "compose", "logs", "--tail=80", "admin-ui"], cwd=str(ROOT), check=False)
+    print("\nRecent nginx logs:")
+    subprocess.run(["docker", "compose", "logs", "--tail=80", "nginx"], cwd=str(ROOT), check=False)
+    return False
 
 
 def load_state():
@@ -167,6 +242,8 @@ def start_existing_install(env):
     result = docker_compose_up(["up","-d","--build"])
     if result.returncode != 0:
         explain_compose_failure(result)
+    else:
+        check_admin_panel()
     print_saved_admin_credentials(env)
 
 
@@ -688,7 +765,8 @@ def main():
             mark_step(state, "compose-failed")
             print_admin_credentials(domain, web_user, web_pass, default_token, admin_key)
             return
-        elif domain and ssl:
+        check_admin_panel()
+        if domain and ssl:
             res=run(["docker","compose","run","--rm","certbot","certonly","--webroot","-w","/var/www/certbot","-d",domain,"--email",email,"--agree-tos","--non-interactive"], check=False)
             if res.returncode==0:
                 (ROOT/"nginx"/"default.conf").write_text(nginx_conf(domain, ssl=True), encoding="utf-8")

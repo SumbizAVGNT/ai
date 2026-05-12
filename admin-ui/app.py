@@ -129,9 +129,9 @@ def env_write(values: dict[str, Any]) -> None:
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_cmd(cmd: list[str], timeout: int = 60) -> dict[str, Any]:
+def run_cmd(cmd: list[str], timeout: int = 60, env: Optional[dict[str, str]] = None) -> dict[str, Any]:
     try:
-        proc = subprocess.run(cmd, cwd=PROJECT_ROOT, text=True, capture_output=True, timeout=timeout)
+        proc = subprocess.run(cmd, cwd=PROJECT_ROOT, text=True, capture_output=True, timeout=timeout, env=env)
         return {"cmd": cmd, "returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
     except FileNotFoundError as exc:
         return {"cmd": cmd, "returncode": 127, "stdout": "", "stderr": str(exc)}
@@ -139,8 +139,75 @@ def run_cmd(cmd: list[str], timeout: int = 60) -> dict[str, Any]:
         return {"cmd": cmd, "returncode": 124, "stdout": exc.stdout or "", "stderr": exc.stderr or f"Command timed out after {timeout}s"}
 
 
+def compose_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("COMPOSE_PARALLEL_LIMIT", "1")
+    return env
+
+
 def run_compose(args: list[str], timeout: int = 60) -> dict[str, Any]:
-    return run_cmd(["docker", "compose"] + args, timeout=timeout)
+    return run_cmd(["docker", "compose"] + args, timeout=timeout, env=compose_env())
+
+
+def run_compose_retry(args: list[str], timeout: int = 60, attempts: int = 3) -> dict[str, Any]:
+    result: dict[str, Any] = {"cmd": ["docker", "compose"] + args, "returncode": 1, "stdout": "", "stderr": ""}
+    for attempt in range(1, attempts + 1):
+        result = run_compose(args, timeout=timeout)
+        if result["returncode"] == 0:
+            return result
+        if attempt < attempts:
+            time.sleep(15)
+    return result
+
+
+def compose_services() -> list[str]:
+    result = run_compose(["config", "--services"], timeout=30)
+    if result["returncode"] != 0:
+        return []
+    available = {line.strip() for line in (result.get("stdout") or "").splitlines() if line.strip()}
+    preferred = ["postgres", "llama-server-coder", "token-gateway", "admin-ui", "nginx"]
+    return [service for service in preferred if service in available]
+
+
+def run_compose_up_sequential(force_recreate: bool = False, services: Optional[list[str]] = None, timeout: int = 900) -> dict[str, Any]:
+    selected = services or compose_services()
+    stdout: list[str] = [f"Starting services one by one (COMPOSE_PARALLEL_LIMIT={compose_env()['COMPOSE_PARALLEL_LIMIT']})\n"]
+    stderr: list[str] = []
+    last: dict[str, Any] = {"cmd": ["docker", "compose", "up"], "returncode": 0, "stdout": "", "stderr": ""}
+
+    run_compose(["stop", "nginx"], timeout=30)
+
+    for service in selected:
+        stdout.append(f"\n== Pull {service} ==\n")
+        last = run_compose_retry(["pull", "--ignore-buildable", service], timeout=timeout)
+        stdout.append(last.get("stdout") or "")
+        stderr.append(last.get("stderr") or "")
+        if last["returncode"] != 0:
+            break
+
+    if last["returncode"] == 0:
+        for service in selected:
+            stdout.append(f"\n== Build {service} ==\n")
+            last = run_compose_retry(["build", service], timeout=timeout)
+            stdout.append(last.get("stdout") or "")
+            stderr.append(last.get("stderr") or "")
+            if last["returncode"] != 0:
+                break
+
+    if last["returncode"] == 0:
+        for service in selected:
+            stdout.append(f"\n== Up {service} ==\n")
+            args = ["up", "-d", "--no-build"]
+            if force_recreate:
+                args.append("--force-recreate")
+            args.append(service)
+            last = run_compose_retry(args, timeout=timeout)
+            stdout.append(last.get("stdout") or "")
+            stderr.append(last.get("stderr") or "")
+            if last["returncode"] != 0:
+                break
+
+    return {"cmd": ["docker", "compose", "up", "sequential"], "returncode": last["returncode"], "stdout": "".join(stdout), "stderr": "".join(stderr)}
 
 
 def run_git(args: list[str], timeout: int = 30) -> dict[str, Any]:
@@ -247,7 +314,7 @@ def update_worker(job_id: str) -> None:
         return
 
     mark(step="restarting")
-    compose = run_compose(["up", "-d", "--build"], timeout=900)
+    compose = run_compose_up_sequential(timeout=900)
     mark(compose=compose)
     if compose["returncode"] != 0:
         mark(status="error", step="failed", error=clean_output(compose), finished_at=int(time.time()))
@@ -417,6 +484,8 @@ def api_system(_: User = Depends(current_user)):
 def api_stack_action(action: str, _: User = Depends(current_user)):
     actions = {"start": ["up", "-d", "--build"], "stop": ["stop"], "restart": ["restart"], "down": ["down"], "status": ["ps"]}
     if action not in actions: raise HTTPException(status_code=400, detail="unknown action")
+    if action == "start":
+        return run_compose_up_sequential(timeout=900)
     return run_compose(actions[action], timeout=180)
 
 @app.get("/api/update/status")

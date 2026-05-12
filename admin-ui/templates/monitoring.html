@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block title %}Monitoring{% endblock %}{% block content %}
+<div class="grid">
+ <div class="card"><div class="muted">Host/container CPU</div><div class="metric">{{ host.cpu }}%</div><div class="bar"><span style="width:{{ host.cpu }}%"></span></div></div>
+ <div class="card"><div class="muted">Memory</div><div class="metric">{{ (host.mem.percent)|round(1) }}%</div><div class="bar"><span style="width:{{ host.mem.percent }}%"></span></div></div>
+ <div class="card"><div class="muted">Disk</div><div class="metric">{{ (host.disk.percent)|round(1) }}%</div><div class="bar"><span style="width:{{ host.disk.percent }}%"></span></div></div>
+ <div class="card full"><h2>btop-like containers</h2><table class="table"><tr><th>Container</th><th>Status</th><th>CPU</th><th>RAM</th><th>Mem MB</th></tr>{% for s in stats %}<tr><td>{{ s.name }}</td><td>{{ s.status }}</td><td>{{ s.cpu_pct }}%</td><td><div class="bar"><span style="width:{{ s.mem_pct }}%"></span></div></td><td>{{ s.mem_mb }}</td></tr>{% endfor %}</table></div>
+ <div class="card full"><h2>Llama throughput</h2><p>Last prompt tokens: <b>{{ metrics.last_prompt_tokens }}</b></p><p>Prompt speed: <b>{{ metrics.prompt_tps }}</b> tok/s · Eval speed: <b>{{ metrics.eval_tps }}</b> tok/s</p><p>Estimated prompt time: <b>{{ metrics.estimate_sec or 'n/a' }}</b> sec</p></div>
+</div>
+{% endblock %}

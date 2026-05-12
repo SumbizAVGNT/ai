@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block title %}Llama Settings{% endblock %}{% block content %}
+{% if message %}<div class="msg">{{ message }}</div>{% endif %}
+<div class="card full"><form method="post" action="{{ base }}/llama" class="formgrid">
+<div class="field"><label>Context -c</label><input name="ctx_size" value="{{ env.CTX_SIZE or '32768' }}"></div>
+<div class="field"><label>Threads -t</label><input name="threads" value="{{ env.THREADS or '16' }}"></div>
+<div class="field"><label>Parallel slots -np</label><input name="parallel_slots" value="{{ env.PARALLEL_SLOTS or '1' }}"></div>
+<div class="field"><label>GPU layers --n-gpu-layers</label><input name="n_gpu_layers" value="{{ env.N_GPU_LAYERS or '0' }}"></div>
+<div class="field"><label>Timeout</label><input name="llama_timeout" value="{{ env.LLAMA_TIMEOUT or '1200' }}"></div>
+<div class="field"><label>Extra args</label><input name="llama_extra_args" value="{{ env.LLAMA_EXTRA_ARGS or '' }}" placeholder="--flash-attn on"></div>
+<label class="pill"><input type="checkbox" name="restart" style="width:auto" checked> Restart llama after save</label><div><button class="btn">Save settings</button></div>
+</form><p class="muted">Settings are stored in config/llama.env. Model path should normally be /models/current.gguf for dynamic switching.</p></div>
+{% endblock %}

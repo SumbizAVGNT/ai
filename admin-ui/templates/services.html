@@ -1,0 +1,4 @@
+{% extends "base.html" %}{% block title %}Services{% endblock %}{% block content %}
+{% if message %}<div class="msg">{{ message }}</div>{% endif %}
+<div class="card full"><table class="table"><tr><th>Name</th><th>Status</th><th>Image</th><th>Ports</th><th>Actions</th></tr>{% for s in services %}<tr><td>{{ s.name }}</td><td class="status {{ s.status }}">{{ s.status }}</td><td>{{ s.image }}</td><td>{{ s.ports }}</td><td><div class="row-actions"><form method="post" action="{{ base }}/services/{{ s.name }}/start"><button class="btn secondary">Start</button></form><form method="post" action="{{ base }}/services/{{ s.name }}/restart"><button class="btn secondary">Restart</button></form><form method="post" action="{{ base }}/services/{{ s.name }}/stop"><button class="btn danger">Stop</button></form></div></td></tr>{% endfor %}</table></div>
+{% endblock %}

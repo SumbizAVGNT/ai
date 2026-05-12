@@ -1,0 +1,38 @@
+[
+  {
+    "id": "qwen25-coder-7b-q4km",
+    "title": "Qwen2.5-Coder 7B Instruct Q4_K_M - fast budget coder",
+    "repo": "Qwen/Qwen2.5-Coder-7B-Instruct-GGUF",
+    "include": "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+    "local_dir": "qwen-coder/Qwen2.5-Coder-7B-Instruct-GGUF",
+    "ctx": 32768,
+    "recommended": "CPU/GPU budget, OpenCode"
+  },
+  {
+    "id": "qwen25-coder-14b-q4km",
+    "title": "Qwen2.5-Coder 14B Instruct Q4_K_M - balanced coder",
+    "repo": "Qwen/Qwen2.5-Coder-14B-Instruct-GGUF",
+    "include": "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+    "local_dir": "qwen-coder/Qwen2.5-Coder-14B-Instruct-GGUF",
+    "ctx": 32768,
+    "recommended": "Good quality; CPU slower, 12GB+ GPU recommended"
+  },
+  {
+    "id": "qwen25-coder-32b-q4km",
+    "title": "Qwen2.5-Coder 32B Instruct Q4_K_M - higher quality, heavy",
+    "repo": "Qwen/Qwen2.5-Coder-32B-Instruct-GGUF",
+    "include": "qwen2.5-coder-32b-instruct-q4_k_m.gguf",
+    "local_dir": "qwen-coder/Qwen2.5-Coder-32B-Instruct-GGUF",
+    "ctx": 32768,
+    "recommended": "Needs much more RAM/VRAM; 24GB+ GPU preferred"
+  },
+  {
+    "id": "qwen25-7b-instruct-q4km",
+    "title": "Qwen2.5 7B Instruct Q4_K_M - general fast model",
+    "repo": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+    "include": "qwen2.5-7b-instruct-q4_k_m.gguf",
+    "local_dir": "qwen-general/Qwen2.5-7B-Instruct-GGUF",
+    "ctx": 32768,
+    "recommended": "General chat; lighter than coder 14B"
+  }
+]

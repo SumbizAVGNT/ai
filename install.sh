@@ -35,6 +35,7 @@ logs_stack(){ need_docker; docker compose logs -f --tail=120 "$@"; }
 test_stack(){ bash scripts/quick_test.sh; }
 issue_cert(){ bash scripts/certbot_issue.sh; }
 renew_certs(){ bash scripts/certbot_renew.sh; }
+regenerate_nginx(){ run_python scripts/nginx_regenerate.py; }
 token_admin(){ bash scripts/token_admin.sh "$@"; }
 admin_url(){ if [ -f .env ]; then . ./.env 2>/dev/null || true; fi; if [ -n "${DOMAIN:-}" ]; then echo "https://${DOMAIN}/ui"; else echo "http://127.0.0.1/ui or http://127.0.0.1:8088/ui/"; fi; }
 doctor_stack(){ need_docker; echo "== compose =="; docker compose ps || true; echo "== health =="; curl -fsS http://127.0.0.1/health || true; echo; echo "== llama =="; curl -fsS http://127.0.0.1:8081/health || true; echo; echo "== admin =="; check_admin_panel || true; echo; }
@@ -156,8 +157,8 @@ compose_up_sequential() {
   check_admin_panel || return 1
 }
 
-start_stack(){ need_docker; compose_up_sequential; }
-recreate_stack(){ need_docker; compose_up_sequential --force-recreate; }
+start_stack(){ need_docker; regenerate_nginx; compose_up_sequential; }
+recreate_stack(){ need_docker; regenerate_nginx; compose_up_sequential --force-recreate; }
 
 check_admin_panel() {
   local admin_ok=1
@@ -338,6 +339,7 @@ Local AI Stack
  13) Renew SSL certificates
  14) Backup
  15) Doctor
+ 16) Regenerate nginx config
   0) Exit
 EOF
     read_choice c "Choose: " || exit 0
@@ -357,6 +359,7 @@ EOF
       13) renew_certs; pause_menu ;;
       14) backup_stack; pause_menu ;;
       15) doctor_stack || true; pause_menu ;;
+      16) regenerate_nginx; need_docker; docker compose up -d --force-recreate nginx; pause_menu ;;
       0|q|quit|exit) exit 0 ;;
       *) echo "Unknown choice"; pause_menu ;;
     esac
@@ -381,6 +384,7 @@ case "$cmd" in
   admin-regenerate|regenerate-admin) regenerate_admin_credentials ;;
   doctor) doctor_stack ;;
   renew) renew_certs ;;
+  nginx-config|regenerate-nginx) regenerate_nginx ;;
   backup) backup_stack ;;
   help|-h|--help)
     cat <<'EOF'
@@ -404,6 +408,7 @@ Commands:
                 regenerate admin login/password
   doctor        basic diagnostics
   renew         renew Let's Encrypt certs
+  nginx-config  regenerate nginx/default.conf from .env and existing certs
   backup        archive important configs
 
 Run ./install.sh without arguments to open the numbered menu.

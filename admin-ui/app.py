@@ -378,7 +378,8 @@ def git_message(ref: str) -> str:
     return git_value(["log", "-1", "--pretty=format:%h %s", ref], "")
 
 
-GENERATED_LOCAL_FILES = {"nginx/default.conf"}
+GENERATED_LOCAL_FILES = {"docker-compose.yml", "nginx/default.conf"}
+AUTO_RESTORED_LOCAL_FILES = GENERATED_LOCAL_FILES | {"install.sh"}
 
 
 def git_dirty_paths() -> list[str]:
@@ -409,6 +410,16 @@ def backup_generated_files(paths: list[str]) -> dict[str, str]:
         backup.write_bytes(src.read_bytes())
         backups[rel] = str(backup)
     return backups
+
+
+def backup_text(backups: dict[str, str], rel: str) -> str:
+    backup = backups.get(rel)
+    if backup and Path(backup).exists():
+        return Path(backup).read_text(encoding="utf-8", errors="replace")
+    target = PROJECT_ROOT / rel
+    if target.exists():
+        return target.read_text(encoding="utf-8", errors="replace")
+    return ""
 
 
 def parse_stack_env() -> dict[str, str]:
@@ -443,6 +454,30 @@ def regenerate_nginx_config() -> dict[str, Any]:
         return {"ok": False, "domain": domain, "ssl": ssl, "error": str(exc)}
 
 
+def regenerate_compose_config(previous_compose: str = "") -> dict[str, Any]:
+    env = parse_stack_env()
+    try:
+        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+        from install_wizard import compose
+
+        clients = {
+            name
+            for name, marker in {
+                "opencode": "opencode-server:",
+                "codex": "codex-runner:",
+                "claude": "claude-code-proxy:",
+            }.items()
+            if marker in previous_compose
+        }
+        backend = env.get("BACKEND", "cpu").strip() or "cpu"
+        local_pg = "local-ai-postgres:" in previous_compose or "@postgres:" in env.get("DATABASE_URL", "")
+        target = PROJECT_ROOT / "docker-compose.yml"
+        target.write_text(compose({"BACKEND": backend}, clients, local_pg), encoding="utf-8")
+        return {"ok": True, "backend": backend, "clients": sorted(clients), "local_postgres": local_pg, "path": str(target)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def git_update_status(fetch: bool = True) -> dict[str, Any]:
     if not (PROJECT_ROOT / ".git").exists():
         return {"configured": False, "error": "This stack is not installed from a git repository."}
@@ -453,7 +488,8 @@ def git_update_status(fetch: bool = True) -> dict[str, Any]:
     current_short = git_value(["rev-parse", "--short", "HEAD"], "")
     dirty_paths = git_dirty_paths()
     generated_dirty_paths = [path for path in dirty_paths if path in GENERATED_LOCAL_FILES]
-    blocking_dirty_paths = [path for path in dirty_paths if path not in GENERATED_LOCAL_FILES]
+    auto_restored_paths = [path for path in dirty_paths if path in AUTO_RESTORED_LOCAL_FILES]
+    blocking_dirty_paths = [path for path in dirty_paths if path not in AUTO_RESTORED_LOCAL_FILES]
     dirty = bool(blocking_dirty_paths)
 
     remote_ref = f"origin/{branch}" if branch and branch != "HEAD" else "origin/main"
@@ -493,6 +529,7 @@ def git_update_status(fetch: bool = True) -> dict[str, Any]:
         "dirty": dirty,
         "dirty_paths": blocking_dirty_paths,
         "generated_dirty_paths": generated_dirty_paths,
+        "auto_restored_paths": auto_restored_paths,
         "has_update": behind_count > 0,
         "can_update": behind_count > 0 and ahead_count == 0 and not dirty and not bool(fetch_error),
         "fetch_error": fetch_error,
@@ -526,11 +563,15 @@ def update_worker(job_id: str) -> None:
         return
 
     branch = status.get("branch") if status.get("branch") != "HEAD" else "main"
+    auto_restored = status.get("auto_restored_paths") or []
     generated_dirty = status.get("generated_dirty_paths") or []
-    if generated_dirty:
-        mark(step="preparing-generated-config", generated_dirty_paths=generated_dirty)
+    backups: dict[str, str] = {}
+    previous_compose = ""
+    if auto_restored:
+        mark(step="preparing-local-files", auto_restored_paths=auto_restored, generated_dirty_paths=generated_dirty)
         backups = backup_generated_files(generated_dirty)
-        restore = run_git(["restore", "--"] + list(generated_dirty), timeout=30)
+        previous_compose = backup_text(backups, "docker-compose.yml")
+        restore = run_git(["restore", "--"] + list(auto_restored), timeout=30)
         mark(generated_backups=backups, generated_restore=restore)
         if restore["returncode"] != 0:
             mark(status="error", step="failed", error=clean_output(restore), finished_at=int(time.time()))
@@ -544,7 +585,14 @@ def update_worker(job_id: str) -> None:
         return
 
     if generated_dirty:
-        mark(step="regenerating-nginx")
+        mark(step="regenerating-local-configs")
+        compose_result = {"ok": True}
+        if "docker-compose.yml" in generated_dirty:
+            compose_result = regenerate_compose_config(previous_compose)
+            mark(compose_config=compose_result)
+            if not compose_result.get("ok"):
+                mark(status="error", step="failed", error=compose_result.get("error", "Could not regenerate docker-compose.yml"), finished_at=int(time.time()))
+                return
         nginx_result = regenerate_nginx_config()
         mark(nginx=nginx_result)
         if not nginx_result.get("ok"):

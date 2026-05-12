@@ -1,12 +1,17 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+const APP_BASE = window.location.pathname.startsWith("/ui") ? "/ui" : "";
 
 let me = null;
 let updateJobId = null;
 let updatePollTimer = null;
 
+function apiUrl(path) {
+  return `${APP_BASE}/api${path}`;
+}
+
 async function api(path, opt = {}) {
-  const r = await fetch(`/api${path}`, {
+  const r = await fetch(apiUrl(path), {
     headers: { "Content-Type": "application/json", ...(opt.headers || {}) },
     ...opt,
   });
@@ -236,7 +241,7 @@ async function uploadModel(file) {
   if (!file) return;
   const fd = new FormData();
   fd.append("file", file);
-  const r = await fetch("/api/models/upload", { method: "POST", body: fd });
+  const r = await fetch(apiUrl("/models/upload"), { method: "POST", body: fd });
   alert(await r.text());
   loadModels();
 }

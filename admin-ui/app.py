@@ -43,7 +43,16 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, future=True)
 app = FastAPI(title="Local AI Stack Admin", version="3.2.0")
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
+app.mount("/ui/static", StaticFiles(directory=str(APP_DIR / "static")), name="ui-static")
 jobs: dict[str, dict[str, Any]] = {}
+
+
+@app.middleware("http")
+async def strip_ui_api_prefix(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if path.startswith("/ui/api/"):
+        request.scope["path"] = path[3:]
+    return await call_next(request)
 
 class User(Base):
     __tablename__ = "admin_users"

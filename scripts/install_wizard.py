@@ -590,6 +590,9 @@ def nginx_conf(domain, ssl):
         return 200 '{"ok":true}';
     }
 
+    location = /ui { return 302 /ui/; }
+    location /ui/api/ { proxy_pass http://admin-ui:8080/api/; proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_read_timeout 1200s; client_max_body_size 20g; }
+    location /ui/static/ { proxy_pass http://admin-ui:8080/static/; proxy_http_version 1.1; proxy_set_header Host $host; }
     location /ui/ { proxy_pass http://admin-ui:8080/ui/; proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }
     location /login { proxy_pass http://admin-ui:8080/login; proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }
     location /logout { proxy_pass http://admin-ui:8080/logout; proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }

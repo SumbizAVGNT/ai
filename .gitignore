@@ -1,5 +1,6 @@
 .env
 .installer-venv/
+.installer-state.json
 admin_key.txt
 admin_login.txt
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, secrets, shutil, subprocess, sys
+import json, os, secrets, shutil, subprocess, sys, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,11 +89,39 @@ def ensure_hf():
     return local_hf_command()
 
 
+def clear_hf_locks(dest: Path):
+    locks = sorted(dest.rglob("*.lock")) if dest.exists() else []
+    if not locks:
+        return
+
+    print("\nНайдены lock-файлы HuggingFace в папке модели:")
+    now = time.time()
+    for lock in locks:
+        try:
+            age = int(now - lock.stat().st_mtime)
+            shown = lock.relative_to(ROOT)
+            print(f"  - {shown} ({age}s old)")
+        except (OSError, ValueError):
+            print(f"  - {lock}")
+
+    print("Если прямо сейчас запущена другая загрузка этой же модели, ответь n.")
+    if not yes("Удалить эти lock-файлы и продолжить?", True):
+        raise RuntimeError("HF download lock exists; stop the other download or remove stale .lock files")
+
+    for lock in locks:
+        try:
+            lock.unlink()
+        except FileNotFoundError:
+            pass
+    print("Lock-файлы удалены.")
+
+
 def download_model(item):
     hf = ensure_hf()
     if not hf: raise RuntimeError("hf CLI missing")
     dest = ROOT / "models" / item["local_dir"]
     dest.mkdir(parents=True, exist_ok=True)
+    clear_hf_locks(dest)
     run(hf + ["download",item["repo"],"--include",item["include"],"--local-dir",dest])
     files = sorted(dest.rglob("*.gguf"), key=lambda p:p.stat().st_size, reverse=True)
     if not files: raise RuntimeError("GGUF not found after download")

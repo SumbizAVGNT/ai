@@ -6,9 +6,37 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG = ROOT / "config" / "models.catalog.json"
 
 
-def run(cmd, check=True):
+def run(cmd, check=True, env=None):
     print("+ " + " ".join(map(str, cmd)))
-    return subprocess.run(list(map(str, cmd)), cwd=str(ROOT), check=check)
+    return subprocess.run(list(map(str, cmd)), cwd=str(ROOT), check=check, env=env)
+
+
+def docker_compose_up(args, attempts=3):
+    env = os.environ.copy()
+    env.setdefault("COMPOSE_PARALLEL_LIMIT", "2")
+    cmd = ["docker", "compose"] + args
+    result = None
+
+    for attempt in range(1, attempts + 1):
+        if attempts > 1:
+            print(f"\nDocker compose attempt {attempt}/{attempts} (COMPOSE_PARALLEL_LIMIT={env['COMPOSE_PARALLEL_LIMIT']})")
+        result = run(cmd, check=False, env=env)
+        if result.returncode == 0:
+            return result
+        if attempt < attempts:
+            print("Docker compose failed. Waiting 15 seconds before retry...")
+            time.sleep(15)
+
+    return result
+
+
+def explain_compose_failure(result):
+    print("\nDocker compose did not finish successfully.")
+    print("Чаще всего это временная ошибка сети при скачивании Docker images.")
+    print("Сгенерированные файлы уже сохранены: .env, admin_login.txt, docker-compose.yml.")
+    print("Попробуй позже запустить: ./install.sh start")
+    print("Если снова будет TLS handshake timeout, проверь сеть/DNS до Docker Hub и ghcr.io.")
+    print(f"Return code: {result.returncode}")
 
 
 def ask(prompt, default=""):
@@ -447,12 +475,14 @@ def main():
     (ROOT/"admin_login.txt").write_text(f"URL: {'https://'+domain+'/ui/' if domain else 'http://127.0.0.1/ui/'}\nlogin: {web_user}\npassword: {web_pass}\nAPI token: {default_token}\nAdmin key: {admin_key}\n", encoding="utf-8")
     print("\nGenerated.")
     if yes("Запустить docker compose сейчас?", True):
-        run(["docker","compose","up","-d","--build"])
-        if domain and ssl:
+        compose_result = docker_compose_up(["up","-d","--build"])
+        if compose_result.returncode != 0:
+            explain_compose_failure(compose_result)
+        elif domain and ssl:
             res=run(["docker","compose","run","--rm","certbot","certonly","--webroot","-w","/var/www/certbot","-d",domain,"--email",email,"--agree-tos","--non-interactive"], check=False)
             if res.returncode==0:
                 (ROOT/"nginx"/"default.conf").write_text(nginx_conf(domain, ssl=True), encoding="utf-8")
-                run(["docker","compose","up","-d","--force-recreate","nginx"])
+                docker_compose_up(["up","-d","--force-recreate","nginx"], attempts=2)
             else: print("Certbot failed, kept HTTP config")
     print_admin_credentials(domain, web_user, web_pass, default_token, admin_key)
     print("\nDone. Open /ui/ with the credentials above.")

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -35,6 +36,7 @@ DEFAULT_ADMIN_USER = os.getenv("ADMIN_UI_USER", os.getenv("ADMIN_WEB_USERNAME", 
 DEFAULT_ADMIN_PASSWORD = os.getenv("ADMIN_UI_PASSWORD", os.getenv("ADMIN_WEB_PASSWORD", "admin"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+BCRYPT_MAX_BYTES = 72
 serializer = URLSafeTimedSerializer(SECRET_KEY, salt="local-ai-admin-session")
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
@@ -54,12 +56,31 @@ class User(Base):
     updated_at = Column(Integer, default=lambda: int(time.time()))
 
 
+def bcrypt_secret(secret: str) -> str:
+    raw = str(secret or "").encode("utf-8")
+    if len(raw) <= BCRYPT_MAX_BYTES:
+        return str(secret or "")
+    return "sha256$" + hashlib.sha256(raw).hexdigest()
+
+
+def hash_password(secret: str) -> str:
+    return pwd_context.hash(bcrypt_secret(secret))
+
+
+def verify_password(secret: str, password_hash: str) -> bool:
+    normalized = bcrypt_secret(secret)
+    try:
+        return pwd_context.verify(normalized, password_hash)
+    except ValueError:
+        return False
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         exists = db.execute(select(User).where(User.username == DEFAULT_ADMIN_USER)).scalar_one_or_none()
         if not exists:
-            db.add(User(username=DEFAULT_ADMIN_USER, password_hash=pwd_context.hash(DEFAULT_ADMIN_PASSWORD), is_admin=True, enabled=True))
+            db.add(User(username=DEFAULT_ADMIN_USER, password_hash=hash_password(DEFAULT_ADMIN_PASSWORD), is_admin=True, enabled=True))
             db.commit()
 
 @app.on_event("startup")
@@ -346,7 +367,7 @@ async def api_login(request: Request, db: Session = Depends(get_db)):
     username = str(data.get("username", ""))
     password = str(data.get("password", ""))
     user = db.execute(select(User).where(User.username == username)).scalar_one_or_none()
-    if not user or not user.enabled or not pwd_context.verify(password, user.password_hash):
+    if not user or not user.enabled or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     resp = JSONResponse({"ok": True, "username": user.username})
     resp.set_cookie("lai_session", make_session(user.id), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 14)
@@ -372,7 +393,7 @@ async def api_create_user(request: Request, _: User = Depends(current_user), db:
         raise HTTPException(status_code=400, detail="username and password are required")
     if db.execute(select(User).where(User.username == username)).scalar_one_or_none():
         raise HTTPException(status_code=409, detail="username already exists")
-    u = User(username=username, password_hash=pwd_context.hash(password), enabled=True, is_admin=bool(data.get("is_admin", True)))
+    u = User(username=username, password_hash=hash_password(password), enabled=True, is_admin=bool(data.get("is_admin", True)))
     db.add(u)
     db.commit()
     return {"ok": True, "id": u.id}
@@ -386,7 +407,7 @@ async def api_update_user(user_id: int, request: Request, _: User = Depends(curr
     if "username" in data and str(data["username"]).strip():
         u.username = str(data["username"]).strip()
     if "password" in data and str(data["password"]):
-        u.password_hash = pwd_context.hash(str(data["password"]))
+        u.password_hash = hash_password(str(data["password"]))
     if "enabled" in data:
         u.enabled = bool(data["enabled"])
     u.updated_at = int(time.time())

@@ -26,7 +26,7 @@ import os
 import time
 from sqlalchemy import select
 
-from app import Base, SessionLocal, User, engine, pwd_context
+from app import Base, SessionLocal, User, engine, hash_password
 
 username = os.environ["NEW_ADMIN_USERNAME"]
 password = os.environ["NEW_ADMIN_PASSWORD"]
@@ -40,11 +40,11 @@ with SessionLocal() as db:
     if user is None:
         user = db.execute(select(User).where(User.is_admin == True).order_by(User.id)).scalars().first()
     if user is None:
-        user = User(username=username, password_hash=pwd_context.hash(password), is_admin=True, enabled=True)
+        user = User(username=username, password_hash=hash_password(password), is_admin=True, enabled=True)
         db.add(user)
     else:
         user.username = username
-        user.password_hash = pwd_context.hash(password)
+        user.password_hash = hash_password(password)
         user.is_admin = True
         user.enabled = True
         user.updated_at = int(time.time())

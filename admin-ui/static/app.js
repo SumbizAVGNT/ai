@@ -244,12 +244,17 @@ async function uploadModel(file) {
 async function loadClients() {
   const d = await api("/clients");
   $("#clients").innerHTML = Object.entries(d).map(([k, v]) => `
-    <div class="row">
-      <b>${esc(k)}</b>
-      <span class="tag ${v.enabled ? "good" : "bad"}">${v.enabled ? "enabled" : "off"}</span>
-      <span>${esc(v.hint)}</span>
-      <span></span>
-      <button data-client="${esc(k)}" onclick="enableClient(this.dataset.client)">enable</button>
+    <div class="client-card">
+      <div class="client-main">
+        <div class="client-title">
+          <b>${esc(k)}</b>
+          <span class="tag ${v.enabled ? "good" : "bad"}">${v.enabled ? "enabled" : "off"}</span>
+        </div>
+        <p>${esc(v.hint)}</p>
+      </div>
+      <button data-client="${esc(k)}" onclick="enableClient(this.dataset.client)" ${v.enabled ? "disabled" : ""}>
+        ${v.enabled ? "enabled" : "enable"}
+      </button>
     </div>
   `).join("");
 }

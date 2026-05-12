@@ -3,6 +3,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
@@ -176,8 +177,68 @@ def compose_env() -> dict[str, str]:
     return env
 
 
+def docker_executable() -> Optional[str]:
+    configured = os.getenv("DOCKER_CLI", "").strip()
+    candidates = [configured, "docker", "/usr/bin/docker", "/usr/local/bin/docker"]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if os.sep in candidate and Path(candidate).exists():
+            return candidate
+        found = shutil.which(candidate)
+        if found:
+            return found
+    return None
+
+
+def compose_base_command() -> Optional[list[str]]:
+    docker = docker_executable()
+    if docker:
+        try:
+            probe = subprocess.run([docker, "compose", "version"], text=True, capture_output=True, timeout=10)
+            if probe.returncode == 0:
+                return [docker, "compose"]
+        except Exception:
+            pass
+
+    legacy = shutil.which("docker-compose")
+    if legacy:
+        return [legacy]
+    return [docker, "compose"] if docker else None
+
+
+def missing_docker_result(args: list[str]) -> dict[str, Any]:
+    return {
+        "cmd": ["docker", "compose"] + args,
+        "returncode": 127,
+        "stdout": "",
+        "stderr": (
+            "Docker CLI is not installed inside the admin-ui container. "
+            "Pull the latest code and rebuild admin-ui: docker compose build --no-cache admin-ui && docker compose up -d admin-ui nginx"
+        ),
+    }
+
+
 def run_compose(args: list[str], timeout: int = 60) -> dict[str, Any]:
-    return run_cmd(["docker", "compose"] + args, timeout=timeout, env=compose_env())
+    base = compose_base_command()
+    if not base:
+        return missing_docker_result(args)
+    return run_cmd(base + args, timeout=timeout, env=compose_env())
+
+
+def run_docker(args: list[str], timeout: int = 60) -> dict[str, Any]:
+    docker = docker_executable()
+    if not docker:
+        return {
+            "cmd": ["docker"] + args,
+            "returncode": 127,
+            "stdout": "",
+            "stderr": (
+                "Docker CLI is not installed inside the admin-ui container. "
+                "Rebuild admin-ui with the latest Dockerfile."
+            ),
+        }
+    return run_cmd([docker] + args, timeout=timeout)
 
 
 def run_compose_retry(args: list[str], timeout: int = 60, attempts: int = 3) -> dict[str, Any]:
@@ -536,11 +597,10 @@ def docker_stats_summary(raw: dict) -> dict:
         return {}
 
 def parse_llama_logs() -> dict:
-    try:
-        proc = subprocess.run(["docker", "logs", "--tail", "600", "llama-server-coder"], text=True, capture_output=True, timeout=5)
-        text = proc.stdout + proc.stderr
-    except Exception as e:
-        return {"error": str(e)}
+    result = run_docker(["logs", "--tail", "600", "llama-server-coder"], timeout=5)
+    if result["returncode"] != 0:
+        return {"error": clean_output(result)}
+    text = result["stdout"] + result["stderr"]
     task_tokens = [int(x) for x in re.findall(r"task\.n_tokens = (\d+)", text)]
     prompt_speeds = [float(x) for x in re.findall(r"prompt eval time =.*?,\s+([0-9.]+) tokens per second", text)]
     eval_speeds = [float(x) for x in re.findall(r"eval time =.*?,\s+([0-9.]+) tokens per second", text)]
@@ -591,8 +651,7 @@ def api_logs(service: str, tail: int = 200, _: User = Depends(current_user)):
     allowed = {"llama-server-coder", "token-gateway", "local-ai-nginx", "nginx", "admin-ui", "postgres"}
     if service not in allowed: raise HTTPException(status_code=400, detail="unsupported service")
     real = "nginx" if service == "local-ai-nginx" else service
-    proc = subprocess.run(["docker", "compose", "logs", f"--tail={int(tail)}", real], cwd=PROJECT_ROOT, text=True, capture_output=True, timeout=15)
-    return {"stdout": proc.stdout, "stderr": proc.stderr, "returncode": proc.returncode}
+    return run_compose(["logs", f"--tail={int(tail)}", real], timeout=15)
 
 @app.get("/api/models")
 def api_models(_: User = Depends(current_user)):

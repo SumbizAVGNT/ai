@@ -26,11 +26,15 @@ def yes(prompt, default=True):
 
 def choose(prompt, options, default):
     print("\n" + prompt)
-    for k, label in options: print(f"  {k}) {label}")
-    allowed = {k for k,_ in options}
+    aliases = {}
+    for i, (k, label) in enumerate(options, 1):
+        hint = f" / {k}" if str(k) != str(i) else ""
+        print(f"  {i}) {label}{hint}")
+        aliases[str(i)] = k
+        aliases[k] = k
     while True:
         v = ask("Выбор", default)
-        if v in allowed: return v
+        if v in aliases: return aliases[v]
         print("Неверный выбор")
 
 
@@ -43,11 +47,46 @@ def load_catalog():
     return json.loads(CATALOG.read_text(encoding="utf-8"))
 
 
+def venv_paths():
+    venv = ROOT / ".installer-venv"
+    if os.name == "nt":
+        return venv, venv / "Scripts" / "python.exe", venv / "Scripts"
+    return venv, venv / "bin" / "python", venv / "bin"
+
+
+def local_hf_command():
+    _, _, bin_dir = venv_paths()
+    for name in ("hf", "hf.exe", "huggingface-cli", "huggingface-cli.exe"):
+        path = bin_dir / name
+        if path.exists():
+            return [str(path)]
+    return None
+
+
 def ensure_hf():
-    if shutil.which("hf"): return shutil.which("hf")
-    if yes("hf CLI не найден. Установить huggingface_hub?", True):
-        run([sys.executable,"-m","pip","install","-U","huggingface_hub"])
-    return shutil.which("hf")
+    for name in ("hf", "huggingface-cli"):
+        found = shutil.which(name)
+        if found:
+            return [found]
+
+    local = local_hf_command()
+    if local:
+        return local
+
+    if not yes("hf CLI не найден. Установить в локальный .installer-venv?", True):
+        return None
+
+    venv, python_path, _ = venv_paths()
+    if not python_path.exists():
+        try:
+            run([sys.executable, "-m", "venv", venv])
+        except subprocess.CalledProcessError:
+            print("\nНе удалось создать Python venv.")
+            print("На Debian/Ubuntu установи: apt install -y python3-venv python3-pip")
+            raise
+
+    run([python_path, "-m", "pip", "install", "-U", "pip", "huggingface_hub[cli]"])
+    return local_hf_command()
 
 
 def download_model(item):
@@ -55,7 +94,7 @@ def download_model(item):
     if not hf: raise RuntimeError("hf CLI missing")
     dest = ROOT / "models" / item["local_dir"]
     dest.mkdir(parents=True, exist_ok=True)
-    run([hf,"download",item["repo"],"--include",item["include"],"--local-dir",dest])
+    run(hf + ["download",item["repo"],"--include",item["include"],"--local-dir",dest])
     files = sorted(dest.rglob("*.gguf"), key=lambda p:p.stat().st_size, reverse=True)
     if not files: raise RuntimeError("GGUF not found after download")
     return files[0]
@@ -327,6 +366,16 @@ def print_admin_credentials(domain, web_user, web_pass, default_token, admin_key
     print("Saved to admin_login.txt")
 
 
+def choose_model(catalog):
+    while True:
+        ch = ask("Выбор модели","2")
+        if ch in {"c", "e"}:
+            return ch
+        if ch.isdigit() and 1 <= int(ch) <= len(catalog):
+            return ch
+        print("Неверный выбор")
+
+
 def main():
     ensure_dirs(); print("=== Local AI Stack installer ===")
     backend = choose("Backend llama.cpp", [("cpu","CPU"),("cuda","NVIDIA CUDA"),("rocm","AMD ROCm"),("vulkan","Vulkan/Hybrid")], "cpu")
@@ -338,7 +387,7 @@ def main():
     catalog=load_catalog()
     for i,it in enumerate(catalog,1): print(f"  {i}) {it['title']} ({it.get('recommended','')})")
     print("  c) Custom HF repo/include\n  e) Existing .gguf inside ./models")
-    ch=ask("Выбор модели","2"); ctx="32768"
+    ch=choose_model(catalog); ctx="32768"
     if ch=="c":
         item={"repo":ask("HF repo","Qwen/Qwen2.5-Coder-14B-Instruct-GGUF"),"include":ask("include","qwen2.5-coder-14b-instruct-q4_k_m.gguf"),"local_dir":ask("local dir","custom_model")}
         model=download_model(item) if yes("Скачать сейчас?", True) else Path(ask("Путь к GGUF"))

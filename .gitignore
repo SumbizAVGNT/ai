@@ -1,4 +1,5 @@
 .env
+.installer-venv/
 admin_key.txt
 admin_login.txt
 

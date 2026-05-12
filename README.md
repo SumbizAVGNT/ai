@@ -54,6 +54,10 @@ cd local-ai-stack-admin
 `admin_login.txt`. В меню это доступно через `Admin panel -> Show saved login/password`;
 там же можно выбрать `Regenerate login/password`.
 
+Если `hf` CLI не установлен, установщик создаст локальное окружение
+`.installer-venv` и поставит туда `huggingface_hub[cli]`. Системный Python при
+этом не изменяется.
+
 ## Обновления из GitHub
 
 В админке есть вкладка `Updates`. Она проверяет `origin/main`, показывает текущий

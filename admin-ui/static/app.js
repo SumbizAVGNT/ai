@@ -1,33 +1,42 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
-const APP_BASE = window.location.pathname.startsWith("/ui") ? "/ui" : "";
 
-let me = null;
-let updateJobId = null;
-let updatePollTimer = null;
+const APP_BASE = window.location.pathname === "/ui" || window.location.pathname.startsWith("/ui/")
+  ? "/ui"
+  : "";
 
-function apiUrl(path) {
+const state = {
+  tab: "overview",
+  me: null,
+  updateJobId: null,
+  updatePollTimer: null,
+};
+
+const subtitles = {
+  overview: "Runtime state, services and quick controls.",
+  tokens: "API keys, limits and usage counters.",
+  users: "Admin panel accounts.",
+  models: "Local models, downloads and uploads.",
+  settings: "Prompt injection and llama.cpp runtime args.",
+  clients: "Optional OpenAI-compatible client helpers.",
+  updates: "GitHub version checks and one-click update.",
+  logs: "Container logs.",
+};
+
+function apiPath(path) {
   return `${APP_BASE}/api${path}`;
 }
 
-async function api(path, opt = {}) {
-  const r = await fetch(apiUrl(path), {
-    headers: { "Content-Type": "application/json", ...(opt.headers || {}) },
-    ...opt,
-  });
-  if (r.status === 401) {
-    showLogin();
-    throw new Error("auth");
-  }
-  const ct = r.headers.get("content-type") || "";
-  if (!r.ok) {
-    const text = ct.includes("json") ? JSON.stringify(await r.json()) : await r.text();
-    throw new Error(text || `HTTP ${r.status}`);
-  }
-  return ct.includes("json") ? await r.json() : await r.text();
+function formatBytes(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n)) return "-";
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${n} B`;
 }
 
-function esc(value) {
+function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -37,377 +46,694 @@ function esc(value) {
   }[ch]));
 }
 
-function fmt(n) {
-  if (n == null) return "-";
-  if (n > 1e9) return `${(n / 1e9).toFixed(1)} GB`;
-  if (n > 1e6) return `${(n / 1e6).toFixed(1)} MB`;
-  if (n > 1e3) return `${(n / 1e3).toFixed(1)} KB`;
-  return String(n);
+function errorText(error) {
+  if (!error) return "Unknown error";
+  if (typeof error === "string") return error;
+  return error.message || JSON.stringify(error);
+}
+
+function toast(message, kind = "info", timeout = 6000) {
+  const el = $("#toast");
+  el.className = `toast ${kind}`;
+  el.textContent = message;
+  el.classList.remove("hidden");
+  if (timeout) {
+    window.clearTimeout(toast.timer);
+    toast.timer = window.setTimeout(() => el.classList.add("hidden"), timeout);
+  }
+}
+
+function pageError(message) {
+  const el = $("#page-alert");
+  if (!message) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    return;
+  }
+  el.textContent = message;
+  el.classList.remove("hidden");
 }
 
 function showLogin() {
-  $("#login").classList.remove("hidden");
-  $("#dash").classList.add("hidden");
+  $("#login-view").classList.remove("hidden");
+  $("#app-view").classList.add("hidden");
 }
 
-function showDash() {
-  $("#login").classList.add("hidden");
-  $("#dash").classList.remove("hidden");
+function showApp() {
+  $("#login-view").classList.add("hidden");
+  $("#app-view").classList.remove("hidden");
+}
+
+async function parseResponse(response) {
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+  if (contentType.includes("application/json")) {
+    try {
+      return text ? JSON.parse(text) : {};
+    } catch {
+      return { raw: text };
+    }
+  }
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+async function api(path, options = {}) {
+  const isForm = options.body instanceof FormData;
+  const headers = isForm ? {} : { "Content-Type": "application/json" };
+  const response = await fetch(apiPath(path), {
+    credentials: "same-origin",
+    headers: { ...headers, ...(options.headers || {}) },
+    ...options,
+  });
+
+  const payload = await parseResponse(response);
+  if (response.status === 401) {
+    showLogin();
+    throw new Error("Not authenticated");
+  }
+  if (!response.ok) {
+    const detail = payload?.detail || payload?.error || payload?.raw || payload;
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return payload;
+}
+
+async function runAction(button, task, successMessage) {
+  const label = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.dataset.busy = "true";
+    button.textContent = "Working...";
+  }
+  pageError("");
+  try {
+    const result = await task();
+    if (successMessage) toast(successMessage, "good");
+    return result;
+  } catch (error) {
+    const message = errorText(error);
+    pageError(message);
+    toast(message, "bad", 9000);
+    throw error;
+  } finally {
+    if (button) {
+      button.disabled = false;
+      delete button.dataset.busy;
+      button.textContent = label;
+    }
+  }
+}
+
+function renderEmpty(target, message) {
+  $(target).innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
+}
+
+function showCommandOutput(title, result) {
+  const box = $("#command-output");
+  const stdout = result?.stdout || "";
+  const stderr = result?.stderr || "";
+  const code = result?.returncode ?? "";
+  box.textContent = `${title}\nreturncode: ${code}\n\n${stdout}${stderr}`;
+  box.classList.remove("hidden");
+}
+
+function setActiveTab(tab) {
+  state.tab = tab;
+  $$(".nav").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
+  $$(".tab-panel").forEach((panel) => panel.classList.add("hidden"));
+  $(`#tab-${tab}`).classList.remove("hidden");
+  $("#page-title").textContent = $(`.nav[data-tab="${tab}"]`)?.textContent.trim() || tab;
+  $("#page-subtitle").textContent = subtitles[tab] || "";
+  pageError("");
+  loadCurrentTab();
+}
+
+async function loadCurrentTab() {
+  try {
+    if (state.tab === "overview") await loadSystem();
+    if (state.tab === "tokens") await loadTokens();
+    if (state.tab === "users") await loadUsers();
+    if (state.tab === "models") await loadModels();
+    if (state.tab === "settings") await loadSettings();
+    if (state.tab === "clients") await loadClients();
+    if (state.tab === "updates") await loadUpdate(true);
+    if (state.tab === "logs") await loadLogs();
+  } catch (error) {
+    pageError(errorText(error));
+  }
 }
 
 async function login() {
-  try {
-    await api("/login", {
-      method: "POST",
-      body: JSON.stringify({ username: $("#login-user").value, password: $("#login-pass").value }),
-    });
-    await boot();
-  } catch (e) {
-    $("#login-error").textContent = "Не вошло: проверь логин и пароль";
-  }
+  $("#login-error").textContent = "";
+  await api("/login", {
+    method: "POST",
+    body: JSON.stringify({
+      username: $("#login-user").value.trim(),
+      password: $("#login-pass").value,
+    }),
+  });
+  await boot();
 }
 
 async function logout() {
   await api("/logout", { method: "POST" });
+  state.me = null;
   showLogin();
 }
 
 async function boot() {
   try {
-    me = await api("/me");
-    $("#user-pill").textContent = me.username;
-    showDash();
-    await refreshAll();
-    setTimeout(() => loadUpdate(true), 1000);
-  } catch (e) {
+    state.me = await api("/me");
+    $("#user-pill").textContent = state.me.username || "admin";
+    showApp();
+    setActiveTab(state.tab || "overview");
+    loadUpdate(false).catch(() => {});
+  } catch {
     showLogin();
   }
 }
 
-$$(".nav").forEach((button) => {
-  button.onclick = () => {
-    $$(".nav").forEach((x) => x.classList.remove("active"));
-    button.classList.add("active");
-    $$(".tab").forEach((x) => x.classList.add("hidden"));
-    $(`#tab-${button.dataset.tab}`).classList.remove("hidden");
-    $("#title").textContent = button.textContent.trim();
-    if (button.dataset.tab === "updates") loadUpdate(true);
-  };
-});
+async function loadSystem() {
+  const data = await api("/system");
+  const host = data.host || {};
+  const memory = host.memory || {};
+  const disk = host.disk || {};
+  const metrics = data.llama_metrics || {};
 
-async function refreshAll() {
-  await Promise.allSettled([
-    loadSystem(),
-    loadTokens(),
-    loadUsers(),
-    loadModels(),
-    loadSettings(),
-    loadClients(),
-    loadUpdate(false),
-  ]);
+  $("#metric-cpu").textContent = `${Math.round(Number(host.cpu_percent || 0))}%`;
+  $("#metric-ram").textContent = `${formatBytes(memory.used)} / ${formatBytes(memory.total)}`;
+  $("#metric-disk").textContent = `${formatBytes(disk.used)} / ${formatBytes(disk.total)}`;
+  $("#metric-speed").textContent = metrics.avg_prompt_tokens_per_second
+    ? `${Number(metrics.avg_prompt_tokens_per_second).toFixed(1)} tok/s`
+    : "-";
+
+  const containers = data.containers || [];
+  if (!containers.length) {
+    renderEmpty("#containers-list", data.docker_error || "No containers found.");
+    return;
+  }
+
+  $("#containers-list").innerHTML = containers.map((container) => {
+    const running = container.status === "running";
+    const stats = container.stats || {};
+    return `
+      <div class="list-row container-row">
+        <div>
+          <strong>${escapeHtml(container.name)}</strong>
+          <small>${escapeHtml((container.image || []).join(", ") || "image")}</small>
+        </div>
+        <span class="status ${running ? "good" : "bad"}">${escapeHtml(container.status)}</span>
+        <span>CPU ${escapeHtml(stats.cpu_percent ?? 0)}%</span>
+        <span>${formatBytes(stats.memory_usage)}</span>
+      </div>
+    `;
+  }).join("");
 }
 
-async function loadSystem() {
-  const d = await api("/system");
-  $("#cpu").textContent = `${d.host.cpu_percent || 0}%`;
-  $("#ram").textContent = `${fmt(d.host.memory.used)} / ${fmt(d.host.memory.total)}`;
-  $("#prompt-speed").textContent = (d.llama_metrics.avg_prompt_tokens_per_second || 0).toFixed(1);
-  $("#eta").textContent = d.llama_metrics.estimated_seconds_for_last_prompt
-    ? `${Math.round(d.llama_metrics.estimated_seconds_for_last_prompt)}s`
-    : "-";
-  $("#containers").innerHTML = (d.containers || []).map((c) => `
-    <div class="row">
-      <b>${esc(c.name)}</b>
-      <span class="tag ${c.status === "running" ? "good" : "bad"}">${esc(c.status)}</span>
-      <span>CPU ${esc(c.stats?.cpu_percent ?? 0)}%</span>
-      <span>RAM ${fmt(c.stats?.memory_usage || 0)}</span>
-      <span></span>
-    </div>
-  `).join("");
+async function stackAction(action) {
+  const result = await api(`/stack/${action}`, { method: "POST" });
+  showCommandOutput(`docker compose ${action}`, result);
+  if (["start", "restart", "stop", "down"].includes(action)) {
+    window.setTimeout(() => loadSystem().catch(() => {}), 1500);
+  }
+  return result;
 }
 
 async function loadTokens() {
-  const d = await api("/tokens");
-  $("#tokens-list").innerHTML = (d.tokens || []).map((t) => `
-    <div class="row">
-      <b>${esc(t.name)}</b>
-      <code>${esc(t.key)}</code>
-      <span>used ${esc(t.used_tokens)}</span>
-      <span>${t.unlimited ? "unlimited" : `${esc(t.remaining_tokens)} left`}</span>
-      <button data-key="${esc(t.key)}" onclick="resetToken(this.dataset.key)">reset</button>
+  const data = await api("/tokens");
+  const tokens = data.tokens || [];
+  if (!tokens.length) {
+    renderEmpty("#tokens-list", "No tokens yet.");
+    return;
+  }
+
+  $("#tokens-list").innerHTML = tokens.map((token) => `
+    <div class="list-row token-row">
+      <div>
+        <strong>${escapeHtml(token.name || "token")}</strong>
+        <code>${escapeHtml(token.key)}</code>
+      </div>
+      <span class="status ${token.enabled ? "good" : "bad"}">${token.enabled ? "enabled" : "disabled"}</span>
+      <span>${escapeHtml(token.used_tokens ?? 0)} used</span>
+      <span>${token.unlimited ? "unlimited" : `${escapeHtml(token.remaining_tokens ?? 0)} left`}</span>
+      <div class="row-actions">
+        <button class="secondary small" data-action="token-toggle" data-key="${escapeHtml(token.key)}" data-enabled="${token.enabled}">
+          ${token.enabled ? "Disable" : "Enable"}
+        </button>
+        <button class="secondary small" data-action="token-reset" data-key="${escapeHtml(token.key)}">Reset</button>
+        <button class="danger small" data-action="token-delete" data-key="${escapeHtml(token.key)}">Delete</button>
+      </div>
     </div>
   `).join("");
 }
 
 async function createToken() {
-  const body = { name: $("#tok-name").value || "token", unlimited: $("#tok-unlimited").checked };
-  if (!body.unlimited && $("#tok-limit").value) body.limit_tokens = Number($("#tok-limit").value);
+  const unlimited = $("#token-unlimited").checked;
+  const body = {
+    name: $("#token-name").value.trim() || "token",
+    unlimited,
+  };
+  if (!unlimited && $("#token-limit").value.trim()) {
+    body.limit_tokens = Number($("#token-limit").value.trim());
+  }
   await api("/tokens", { method: "POST", body: JSON.stringify(body) });
-  loadTokens();
+  $("#token-form").reset();
+  $("#token-unlimited").checked = true;
+  await loadTokens();
 }
 
-async function resetToken(key) {
-  await api(`/tokens/${encodeURIComponent(key)}`, { method: "PATCH", body: JSON.stringify({ reset_usage: true }) });
-  loadTokens();
+async function patchToken(key, body) {
+  await api(`/tokens/${encodeURIComponent(key)}`, { method: "PATCH", body: JSON.stringify(body) });
+  await loadTokens();
+}
+
+async function deleteToken(key) {
+  if (!window.confirm("Delete this token?")) return;
+  await api(`/tokens/${encodeURIComponent(key)}`, { method: "DELETE" });
+  await loadTokens();
 }
 
 async function loadUsers() {
-  const d = await api("/users");
-  $("#users-list").innerHTML = (d.users || []).map((u) => `
-    <div class="row">
-      <b>${esc(u.username)}</b>
-      <span class="tag">${u.is_admin ? "admin" : "user"}</span>
-      <span>${u.enabled ? "enabled" : "disabled"}</span>
-      <span></span>
-      <button onclick="disableUser(${Number(u.id)}, ${Boolean(u.enabled)})">${u.enabled ? "disable" : "enable"}</button>
-    </div>
-  `).join("");
+  const data = await api("/users");
+  const users = data.users || [];
+  if (!users.length) {
+    renderEmpty("#users-list", "No users found.");
+    return;
+  }
+
+  $("#users-list").innerHTML = users.map((user) => {
+    const isMe = state.me && Number(state.me.id) === Number(user.id);
+    return `
+      <div class="list-row user-row">
+        <div>
+          <strong>${escapeHtml(user.username)}</strong>
+          <small>${isMe ? "current session" : `id ${escapeHtml(user.id)}`}</small>
+        </div>
+        <span class="status ${user.enabled ? "good" : "bad"}">${user.enabled ? "enabled" : "disabled"}</span>
+        <span>${user.is_admin ? "admin" : "user"}</span>
+        <div class="row-actions">
+          <button class="secondary small" data-action="user-toggle" data-id="${escapeHtml(user.id)}" data-enabled="${user.enabled}">
+            ${user.enabled ? "Disable" : "Enable"}
+          </button>
+          <button class="secondary small" data-action="user-password" data-id="${escapeHtml(user.id)}">Password</button>
+          <button class="danger small" data-action="user-delete" data-id="${escapeHtml(user.id)}" ${isMe ? "disabled" : ""}>Delete</button>
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 async function createUser() {
   await api("/users", {
     method: "POST",
-    body: JSON.stringify({ username: $("#new-user").value, password: $("#new-pass").value, is_admin: true }),
+    body: JSON.stringify({
+      username: $("#new-user").value.trim(),
+      password: $("#new-pass").value,
+      is_admin: true,
+    }),
   });
-  loadUsers();
+  $("#user-form").reset();
+  await loadUsers();
 }
 
-async function disableUser(id, enabled) {
-  await api(`/users/${id}`, { method: "PATCH", body: JSON.stringify({ enabled: !enabled }) });
-  loadUsers();
+async function patchUser(id, body) {
+  await api(`/users/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
+  await loadUsers();
+}
+
+async function deleteUser(id) {
+  if (!window.confirm("Delete this user?")) return;
+  await api(`/users/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await loadUsers();
 }
 
 async function loadSettings() {
-  const d = await api("/settings");
-  $("#prompt").value = d.prompt || "";
-  for (const k of ["CTX_SIZE", "THREADS", "PARALLEL_SLOTS", "N_GPU_LAYERS", "LLAMA_TIMEOUT"]) {
-    $(`#${k}`).value = d.llama[k] || "";
+  const data = await api("/settings");
+  $("#prompt").value = data.prompt || "";
+  const llama = data.llama || {};
+  for (const key of ["CTX_SIZE", "THREADS", "PARALLEL_SLOTS", "N_GPU_LAYERS", "LLAMA_TIMEOUT"]) {
+    $(`#${key}`).value = llama[key] || "";
   }
+}
+
+function settingsPayload() {
+  const body = { ANTI_CONFIRM_SYSTEM_PROMPT: $("#prompt").value };
+  for (const key of ["CTX_SIZE", "THREADS", "PARALLEL_SLOTS", "N_GPU_LAYERS", "LLAMA_TIMEOUT"]) {
+    body[key] = $(`#${key}`).value;
+  }
+  return body;
 }
 
 async function saveSettings(restart = false) {
-  const body = { ANTI_CONFIRM_SYSTEM_PROMPT: $("#prompt").value };
-  for (const k of ["CTX_SIZE", "THREADS", "PARALLEL_SLOTS", "N_GPU_LAYERS", "LLAMA_TIMEOUT"]) {
-    body[k] = $(`#${k}`).value;
+  const result = await api("/settings", { method: "POST", body: JSON.stringify(settingsPayload()) });
+  if (result.gateway_error) {
+    throw new Error(`Saved to .env, but token-gateway did not accept prompt update: ${result.gateway_error}`);
   }
-  await api("/settings", { method: "POST", body: JSON.stringify(body) });
-  if (restart) await stack("restart");
-  alert("saved");
-}
-
-async function stack(action) {
-  const r = await api(`/stack/${action}`, { method: "POST" });
-  alert((r.stdout || "") + (r.stderr || ""));
-  loadSystem();
+  if (restart) await stackAction("restart");
 }
 
 async function loadModels() {
-  const d = await api("/models");
-  $("#models-local").innerHTML = (d.local || []).map((m) => `
-    <div class="row">
-      <b>${esc(m.name)}</b>
-      <span>${fmt(m.size)}</span>
-      <span>${m.path === d.current ? "current" : ""}</span>
-      <span></span>
-      <button data-path="${esc(m.path)}" onclick="switchModel(this.dataset.path)">switch</button>
-    </div>
-  `).join("");
+  const data = await api("/models");
+  const local = data.local || [];
+  const catalog = data.catalog || [];
+
+  if (!local.length) {
+    renderEmpty("#models-local", "No .gguf files found in ./models.");
+  } else {
+    $("#models-local").innerHTML = local.map((model) => `
+      <div class="list-row model-row">
+        <div>
+          <strong>${escapeHtml(model.name)}</strong>
+          <code>${escapeHtml(model.path)}</code>
+        </div>
+        <span>${formatBytes(model.size)}</span>
+        <span class="status ${model.path === data.current ? "good" : ""}">${model.path === data.current ? "current" : "available"}</span>
+        <button class="secondary small" data-action="model-switch" data-path="${escapeHtml(model.path)}">Switch</button>
+      </div>
+    `).join("");
+  }
+
+  if (!catalog.length) {
+    renderEmpty("#models-catalog", "Catalog is empty.");
+  } else {
+    $("#models-catalog").innerHTML = catalog.map((item) => `
+      <div class="catalog-card">
+        <strong>${escapeHtml(item.title || item.repo)}</strong>
+        <p>${escapeHtml(item.description || item.recommended || "")}</p>
+        <code>${escapeHtml(item.repo)} / ${escapeHtml(item.include)}</code>
+        <button class="secondary small"
+          data-action="catalog-download"
+          data-repo="${escapeHtml(item.repo)}"
+          data-include="${escapeHtml(item.include)}"
+          data-dir="${escapeHtml(item.local_dir || "")}">
+          Download
+        </button>
+      </div>
+    `).join("");
+  }
+
+  await loadModelJobs(false);
 }
 
 async function switchModel(path) {
   await api("/models/switch", { method: "POST", body: JSON.stringify({ path, restart: true }) });
-  loadModels();
+  await loadModels();
 }
 
-async function downloadModel() {
-  await api("/models/download", {
+async function downloadModel(repo, include, localDir) {
+  const result = await api("/models/download", {
     method: "POST",
-    body: JSON.stringify({
-      repo: $("#hf-repo").value,
-      include: $("#hf-include").value || "*.gguf",
-      local_dir: $("#hf-dir").value,
-    }),
+    body: JSON.stringify({ repo, include: include || "*.gguf", local_dir: localDir || "" }),
   });
-  setTimeout(loadJobs, 1000);
+  toast(`Download queued: ${result.job_id}`, "good");
+  await loadModelJobs(true);
 }
 
-async function loadJobs() {
-  if ($("#dash").classList.contains("hidden")) return;
-  const d = await api("/models/jobs");
-  $("#jobs").textContent = JSON.stringify(d.jobs, null, 2);
+async function uploadModel() {
+  const file = $("#gguf-file").files[0];
+  if (!file) throw new Error("Choose a .gguf file first.");
+  const form = new FormData();
+  form.append("file", file);
+  await api("/models/upload", { method: "POST", body: form });
+  $("#gguf-file").value = "";
+  await loadModels();
 }
 
-async function uploadModel(file) {
-  if (!file) return;
-  const fd = new FormData();
-  fd.append("file", file);
-  const r = await fetch(apiUrl("/models/upload"), { method: "POST", body: fd });
-  alert(await r.text());
-  loadModels();
+async function loadModelJobs(show = true) {
+  const data = await api("/models/jobs");
+  const box = $("#jobs-output");
+  box.textContent = JSON.stringify(data.jobs || {}, null, 2);
+  box.classList.toggle("hidden", !show && Object.keys(data.jobs || {}).length === 0);
 }
 
 async function loadClients() {
-  const d = await api("/clients");
-  $("#clients").innerHTML = Object.entries(d).map(([k, v]) => `
-    <div class="client-card">
-      <div class="client-main">
-        <div class="client-title">
-          <b>${esc(k)}</b>
-          <span class="tag ${v.enabled ? "good" : "bad"}">${v.enabled ? "enabled" : "off"}</span>
-        </div>
-        <p>${esc(v.hint)}</p>
+  const data = await api("/clients");
+  $("#clients-list").innerHTML = Object.entries(data).map(([name, client]) => `
+    <div class="list-row client-row">
+      <div>
+        <strong>${escapeHtml(name)}</strong>
+        <small>${escapeHtml(client.hint || "")}</small>
       </div>
-      <button data-client="${esc(k)}" onclick="enableClient(this.dataset.client)" ${v.enabled ? "disabled" : ""}>
-        ${v.enabled ? "enabled" : "enable"}
+      <span class="status ${client.enabled ? "good" : "bad"}">${client.enabled ? "running" : "off"}</span>
+      <span>${client.defined ? "defined" : "missing in compose"}</span>
+      <button class="secondary small" data-action="client-enable" data-client="${escapeHtml(name)}" ${client.enabled ? "disabled" : ""}>
+        ${client.enabled ? "Enabled" : "Enable"}
       </button>
     </div>
   `).join("");
 }
 
 async function enableClient(client) {
-  const r = await api(`/clients/${client}/enable`, { method: "POST" });
-  alert((r.result?.stdout || "") + (r.result?.stderr || ""));
-  loadClients();
+  const result = await api(`/clients/${encodeURIComponent(client)}/enable`, { method: "POST" });
+  showCommandOutput(`enable ${client}`, result.result || result);
+  if (result.ok === false || (result.result && result.result.returncode !== 0)) {
+    throw new Error((result.result?.stderr || result.result?.stdout || result.enable?.stderr || "Client command failed").trim());
+  }
+  await loadClients();
 }
 
 async function loadLogs() {
-  const svc = $("#log-service").value;
-  const d = await api(`/logs/${svc}?tail=250`);
-  $("#logs").textContent = (d.stdout || "") + (d.stderr || "");
+  const service = $("#log-service").value;
+  const data = await api(`/logs/${encodeURIComponent(service)}?tail=300`);
+  $("#logs-output").textContent = (data.stdout || "") + (data.stderr || "") || "No logs.";
 }
 
 function setUpdateState(kind, label) {
   const badge = $("#update-state");
-  badge.className = `status-badge ${kind || ""}`.trim();
+  badge.className = `status ${kind || ""}`.trim();
   badge.textContent = label;
 }
 
-function renderUpdate(d) {
-  const dot = $("#update-dot");
+function renderUpdate(data) {
+  $("#update-current").textContent = data.current_short || "-";
+  $("#update-current-msg").textContent = data.current_message || "-";
+  $("#update-latest").textContent = data.latest_short || "-";
+  $("#update-latest-msg").textContent = data.latest_message || "-";
+  $("#update-branch").textContent = data.branch || "-";
+  $("#update-remote").textContent = data.remote || "-";
+  $("#update-dot").classList.toggle("hidden", !data.has_update);
+
   const apply = $("#update-apply");
   apply.disabled = true;
-  dot.classList.toggle("hidden", !d.has_update);
 
-  $("#update-current").textContent = d.current_short || "-";
-  $("#update-current-msg").textContent = d.current_message || "-";
-  $("#update-latest").textContent = d.latest_short || "-";
-  $("#update-latest-msg").textContent = d.latest_message || "-";
-  $("#update-branch").textContent = d.branch || "-";
-  $("#update-remote").textContent = d.remote || "-";
-
-  if (!d.configured) {
-    setUpdateState("bad", "Git не настроен");
-    $("#update-title").textContent = "Обновления недоступны";
-    $("#update-copy").textContent = d.error || "Папка стека не является git-репозиторием.";
-  } else if (d.fetch_error) {
-    setUpdateState("bad", "Ошибка проверки");
-    $("#update-title").textContent = "Не удалось проверить GitHub";
-    $("#update-copy").textContent = d.fetch_error;
-  } else if (d.dirty) {
-    setUpdateState("bad", "Есть локальные изменения");
-    $("#update-title").textContent = "Обновление заблокировано";
-    $("#update-copy").textContent = "В рабочей папке есть незакоммиченные изменения. Сохрани их перед обновлением.";
-  } else if (d.ahead > 0) {
-    setUpdateState("warn", "Локальная версия впереди");
-    $("#update-title").textContent = "Нужна ручная проверка";
-    $("#update-copy").textContent = "Локальная ветка содержит коммиты, которых нет на GitHub.";
-  } else if (d.has_update) {
-    setUpdateState("warn", "Доступно обновление");
-    $("#update-title").textContent = `Новая версия готова: +${d.behind} commit`;
-    $("#update-copy").textContent = "Можно скачать обновление с GitHub и пересобрать контейнеры автоматически.";
-    apply.disabled = !d.can_update;
-  } else {
-    setUpdateState("good", "Актуально");
-    $("#update-title").textContent = "Установлена свежая версия";
-    $("#update-copy").textContent = "Локальный стек совпадает с GitHub.";
+  if (!data.configured) {
+    setUpdateState("bad", "Git not configured");
+    $("#update-title").textContent = "Updates are not available";
+    $("#update-copy").textContent = data.error || "This folder is not a git repository.";
+    return;
   }
-
-  $("#update-mini").innerHTML = `
-    <b>${esc($("#update-state").textContent)}</b><br>
-    ${esc($("#update-title").textContent)}<br>
-    <span>${esc(d.current_short || "-")} -> ${esc(d.latest_short || "-")}</span>
-  `;
+  if (data.fetch_error) {
+    setUpdateState("bad", "Check failed");
+    $("#update-title").textContent = "Could not check GitHub";
+    $("#update-copy").textContent = data.fetch_error;
+    return;
+  }
+  if (data.dirty) {
+    setUpdateState("bad", "Local changes");
+    $("#update-title").textContent = "Update is blocked";
+    $("#update-copy").textContent = "There are uncommitted local changes. Commit or stash them first.";
+    return;
+  }
+  if (data.ahead > 0) {
+    setUpdateState("warn", "Local branch ahead");
+    $("#update-title").textContent = "Manual check required";
+    $("#update-copy").textContent = "Local commits are not on origin; fast-forward update is not safe.";
+    return;
+  }
+  if (data.has_update) {
+    setUpdateState("warn", "Update available");
+    $("#update-title").textContent = `New version: ${data.behind} commit(s)`;
+    $("#update-copy").textContent = "Download the latest code from GitHub and rebuild the stack.";
+    apply.disabled = !data.can_update;
+    return;
+  }
+  setUpdateState("good", "Up to date");
+  $("#update-title").textContent = "Installed version matches GitHub";
+  $("#update-copy").textContent = "No update is available.";
 }
 
 async function loadUpdate(fetch = true) {
-  try {
-    const d = await api(`/update/status?fetch=${fetch ? "true" : "false"}`);
-    renderUpdate(d);
-  } catch (e) {
-    setUpdateState("bad", "Ошибка");
-    $("#update-title").textContent = "Проверка не выполнена";
-    $("#update-copy").textContent = e.message;
-    $("#update-mini").textContent = "Проверка обновлений не выполнена.";
-    $("#update-apply").disabled = true;
-  }
+  const data = await api(`/update/status?fetch=${fetch ? "true" : "false"}`);
+  renderUpdate(data);
 }
 
 function renderUpdateJob(job) {
   const box = $("#update-progress");
   box.classList.remove("hidden");
-  const status = job.status || "running";
-  const step = job.step || "queued";
-  const error = job.error ? `<div class="error">${esc(job.error)}</div>` : "";
-  const message = job.message ? `<div>${esc(job.message)}</div>` : "";
-  box.innerHTML = `
-    <div class="progress-step"><b>Status</b><span>${esc(status)}</span></div>
-    <div class="progress-step"><b>Step</b><span>${esc(step)}</span></div>
-    ${message}
-    ${error}
-  `;
-  if (status === "done") {
-    setUpdateState("good", "Готово");
-    $("#update-title").textContent = "Обновление установлено";
-    $("#update-copy").textContent = "Контейнеры пересобираются или уже перезапущены.";
-  } else if (status === "error") {
-    setUpdateState("bad", "Ошибка");
-    $("#update-title").textContent = "Обновление не завершилось";
-    $("#update-copy").textContent = job.error || "Проверь лог обновления.";
+  box.textContent = JSON.stringify(job, null, 2);
+
+  if (job.status === "done") {
+    setUpdateState("good", "Done");
+    $("#update-title").textContent = "Update completed";
+    $("#update-copy").textContent = job.message || "Stack was updated and restarted.";
+  } else if (job.status === "error") {
+    setUpdateState("bad", "Failed");
+    $("#update-title").textContent = "Update failed";
+    $("#update-copy").textContent = job.error || "Check the update output.";
   } else {
-    setUpdateState("warn", "Обновляется");
-    $("#update-title").textContent = "Скачиваю обновление и перезапускаю стек";
-    $("#update-copy").textContent = "Админка может на короткое время пропасть, пока контейнер пересобирается.";
+    setUpdateState("warn", "Updating");
+    $("#update-title").textContent = "Downloading and restarting";
+    $("#update-copy").textContent = `Current step: ${job.step || "queued"}`;
   }
 }
 
 async function pollUpdateJob() {
-  if (!updateJobId) return;
-  try {
-    const job = await api(`/update/jobs/${updateJobId}`);
-    renderUpdateJob(job);
-    if (["done", "error"].includes(job.status)) {
-      clearInterval(updatePollTimer);
-      updatePollTimer = null;
-      updateJobId = null;
-      $("#update-apply").disabled = true;
-      setTimeout(() => loadUpdate(false), 2500);
-    }
-  } catch (e) {
-    $("#update-progress").classList.remove("hidden");
-    $("#update-progress").innerHTML = `
-      <div class="progress-step"><b>Status</b><span>waiting</span></div>
-      <div class="muted">Админка может перезапускаться. Проверка продолжится автоматически.</div>
-    `;
+  if (!state.updateJobId) return;
+  const job = await api(`/update/jobs/${state.updateJobId}`);
+  renderUpdateJob(job);
+  if (["done", "error"].includes(job.status)) {
+    window.clearInterval(state.updatePollTimer);
+    state.updatePollTimer = null;
+    state.updateJobId = null;
+    await loadUpdate(false).catch(() => {});
   }
 }
 
 async function applyUpdate() {
-  $("#update-apply").disabled = true;
   $("#update-progress").classList.remove("hidden");
-  $("#update-progress").innerHTML = '<div class="progress-step"><b>Status</b><span>queued</span></div>';
+  $("#update-progress").textContent = "Queued...";
   const result = await api("/update/apply", { method: "POST", body: "{}" });
-  updateJobId = result.job_id;
-  if (updatePollTimer) clearInterval(updatePollTimer);
-  updatePollTimer = setInterval(pollUpdateJob, 2500);
+  state.updateJobId = result.job_id;
+  if (state.updatePollTimer) window.clearInterval(state.updatePollTimer);
+  state.updatePollTimer = window.setInterval(() => pollUpdateJob().catch(() => {}), 2500);
   await pollUpdateJob();
 }
 
-setInterval(loadJobs, 5000);
-setInterval(() => {
-  if (!$("#dash").classList.contains("hidden")) loadSystem();
-}, 5000);
-setInterval(() => {
-  if (!$("#dash").classList.contains("hidden")) loadUpdate(true);
+function handleAction(button) {
+  const action = button.dataset.action;
+  const stackMap = {
+    "stack-start": "start",
+    "stack-stop": "stop",
+    "stack-restart": "restart",
+    "stack-down": "down",
+    "stack-status": "status",
+  };
+
+  if (action === "refresh") return runAction(button, loadCurrentTab, "Refreshed");
+  if (action === "logout") return runAction(button, logout);
+  if (action === "load-system") return runAction(button, loadSystem, "Containers reloaded");
+  if (action === "load-tokens") return runAction(button, loadTokens, "Tokens reloaded");
+  if (action === "load-users") return runAction(button, loadUsers, "Users reloaded");
+  if (action === "load-models") return runAction(button, loadModels, "Models reloaded");
+  if (action === "load-clients") return runAction(button, loadClients, "Clients reloaded");
+  if (action === "load-update") return runAction(button, () => loadUpdate(true), "Update status refreshed");
+  if (action === "apply-update") return runAction(button, applyUpdate);
+  if (action === "upload-model") return runAction(button, uploadModel, "Model uploaded");
+  if (stackMap[action]) return runAction(button, () => stackAction(stackMap[action]), `Stack ${stackMap[action]} finished`);
+
+  if (action === "token-toggle") {
+    return runAction(button, () => patchToken(button.dataset.key, { enabled: button.dataset.enabled !== "true" }), "Token updated");
+  }
+  if (action === "token-reset") {
+    return runAction(button, () => patchToken(button.dataset.key, { reset_usage: true }), "Token usage reset");
+  }
+  if (action === "token-delete") {
+    return runAction(button, () => deleteToken(button.dataset.key), "Token deleted");
+  }
+  if (action === "user-toggle") {
+    return runAction(button, () => patchUser(button.dataset.id, { enabled: button.dataset.enabled !== "true" }), "User updated");
+  }
+  if (action === "user-password") {
+    const password = window.prompt("New password");
+    if (!password) return undefined;
+    return runAction(button, () => patchUser(button.dataset.id, { password }), "Password changed");
+  }
+  if (action === "user-delete") {
+    return runAction(button, () => deleteUser(button.dataset.id), "User deleted");
+  }
+  if (action === "model-switch") {
+    return runAction(button, () => switchModel(button.dataset.path), "Model switched");
+  }
+  if (action === "catalog-download") {
+    return runAction(
+      button,
+      () => downloadModel(button.dataset.repo, button.dataset.include, button.dataset.dir),
+      "Download started",
+    );
+  }
+  if (action === "client-enable") {
+    return runAction(button, () => enableClient(button.dataset.client), "Client command finished");
+  }
+  if (action === "save-settings-restart") {
+    return runAction(button, () => saveSettings(true), "Settings saved");
+  }
+  return undefined;
+}
+
+document.addEventListener("click", (event) => {
+  const nav = event.target.closest("[data-tab]");
+  if (nav) {
+    event.preventDefault();
+    setActiveTab(nav.dataset.tab);
+    return;
+  }
+
+  const button = event.target.closest("[data-action]");
+  if (!button) return;
+  event.preventDefault();
+  handleAction(button)?.catch(() => {});
+});
+
+$("#login-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runAction($("#login-form button[type='submit']"), login).catch((error) => {
+    $("#login-error").textContent = errorText(error);
+  });
+});
+
+$("#token-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runAction($("#token-form button[type='submit']"), createToken, "Token created").catch(() => {});
+});
+
+$("#user-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runAction($("#user-form button[type='submit']"), createUser, "User created").catch(() => {});
+});
+
+$("#hf-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const repo = $("#hf-repo").value.trim();
+  const include = $("#hf-include").value.trim() || "*.gguf";
+  const localDir = $("#hf-dir").value.trim();
+  runAction($("#hf-form button[type='submit']"), () => downloadModel(repo, include, localDir), "Download started").catch(() => {});
+});
+
+$("#settings-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runAction($("#settings-form button[type='submit']"), () => saveSettings(false), "Settings saved").catch(() => {});
+});
+
+$("#logs-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  runAction($("#logs-form button[type='submit']"), loadLogs, "Logs loaded").catch(() => {});
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  pageError(errorText(event.reason));
+});
+
+window.setInterval(() => {
+  if (!$("#app-view").classList.contains("hidden") && state.tab === "overview") {
+    loadSystem().catch(() => {});
+  }
+}, 7000);
+
+window.setInterval(() => {
+  if (!$("#app-view").classList.contains("hidden")) {
+    loadUpdate(false).catch(() => {});
+  }
 }, 300000);
+
+window.setInterval(() => {
+  if (!$("#app-view").classList.contains("hidden") && state.tab === "models") {
+    loadModelJobs(false).catch(() => {});
+  }
+}, 5000);
 
 boot();

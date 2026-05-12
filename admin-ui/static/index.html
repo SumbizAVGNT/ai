@@ -1,195 +1,240 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Local AI Stack Admin</title>
-  <link rel="stylesheet" href="static/style.css">
+  <link rel="stylesheet" href="static/style.css?v=5">
 </head>
 <body>
-  <div class="bg-grid"></div>
+  <div id="toast" class="toast hidden"></div>
 
-  <section id="login" class="login-card hidden">
-    <div class="brand-mark">AI</div>
-    <h1>Local AI Stack</h1>
-    <p class="muted">Admin panel</p>
-    <input id="login-user" placeholder="Логин" value="admin" autocomplete="username">
-    <input id="login-pass" type="password" placeholder="Пароль" autocomplete="current-password">
-    <button onclick="login()">Войти</button>
-    <p id="login-error" class="error"></p>
+  <section id="login-view" class="login-view hidden">
+    <form id="login-form" class="login-panel" autocomplete="on">
+      <div class="logo">AI</div>
+      <h1>Local AI Stack</h1>
+      <p class="muted">Admin panel</p>
+      <label>
+        <span>Login</span>
+        <input id="login-user" name="username" value="admin" autocomplete="username" required>
+      </label>
+      <label>
+        <span>Password</span>
+        <input id="login-pass" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">Sign in</button>
+      <div id="login-error" class="inline-error"></div>
+    </form>
   </section>
 
-  <section id="dash" class="hidden">
+  <section id="app-view" class="app hidden">
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-dot"></span>
-        <b>AI Admin</b>
+        <span class="brand-mark"></span>
+        <div>
+          <strong>AI Admin</strong>
+          <small>Local stack</small>
+        </div>
       </div>
-      <button class="nav active" data-tab="overview">Обзор</button>
-      <button class="nav" data-tab="tokens">Токены</button>
-      <button class="nav" data-tab="users">Пользователи</button>
-      <button class="nav" data-tab="models">Модели</button>
-      <button class="nav" data-tab="settings">Llama / Prompt</button>
-      <button class="nav" data-tab="clients">Clients</button>
-      <button class="nav" data-tab="updates">Updates <span id="update-dot" class="nav-dot hidden"></span></button>
-      <button class="nav" data-tab="logs">Логи</button>
-      <button class="danger" onclick="stack('restart')">Restart stack</button>
-      <button onclick="logout()">Выйти</button>
+
+      <nav class="nav-list" aria-label="Admin sections">
+        <button class="nav active" data-tab="overview">Overview</button>
+        <button class="nav" data-tab="tokens">Tokens</button>
+        <button class="nav" data-tab="users">Users</button>
+        <button class="nav" data-tab="models">Models</button>
+        <button class="nav" data-tab="settings">Llama & Prompt</button>
+        <button class="nav" data-tab="clients">Clients</button>
+        <button class="nav" data-tab="updates">Updates <span id="update-dot" class="dot hidden"></span></button>
+        <button class="nav" data-tab="logs">Logs</button>
+      </nav>
+
+      <div class="side-actions">
+        <button class="secondary" data-action="refresh">Refresh</button>
+        <button class="danger" data-action="stack-restart">Restart stack</button>
+        <button class="secondary" data-action="logout">Logout</button>
+      </div>
     </aside>
 
-    <section class="content">
+    <main class="content">
       <header class="topbar">
         <div>
-          <h2 id="title">Обзор</h2>
-          <p class="muted">Мониторинг, модели, токены и обновления стека</p>
+          <h2 id="page-title">Overview</h2>
+          <p id="page-subtitle" class="muted">Runtime state, services and quick controls.</p>
         </div>
-        <div class="pill" id="user-pill">admin</div>
+        <div class="user-pill" id="user-pill">admin</div>
       </header>
 
-      <div id="tab-overview" class="tab">
-        <div class="grid cards">
-          <div class="card"><span>CPU</span><b id="cpu">...</b></div>
-          <div class="card"><span>RAM</span><b id="ram">...</b></div>
-          <div class="card"><span>Prompt tok/s</span><b id="prompt-speed">...</b></div>
-          <div class="card"><span>ETA last prompt</span><b id="eta">...</b></div>
+      <div id="page-alert" class="page-alert hidden"></div>
+
+      <section id="tab-overview" class="tab-panel">
+        <div class="metrics">
+          <div class="metric"><span>CPU</span><strong id="metric-cpu">...</strong></div>
+          <div class="metric"><span>RAM</span><strong id="metric-ram">...</strong></div>
+          <div class="metric"><span>Disk</span><strong id="metric-disk">...</strong></div>
+          <div class="metric"><span>Prompt speed</span><strong id="metric-speed">...</strong></div>
         </div>
-        <div class="grid two">
-          <div class="panel">
-            <h3>Containers</h3>
-            <div id="containers"></div>
-          </div>
-          <div class="panel update-compact">
+
+        <div class="split">
+          <section class="panel">
             <div class="panel-head">
-              <h3>Updates</h3>
-              <button class="secondary small" onclick="loadUpdate(true)">Проверить</button>
+              <h3>Containers</h3>
+              <button class="secondary small" data-action="load-system">Reload</button>
             </div>
-            <div id="update-mini" class="update-mini muted">Проверка версии...</div>
+            <div id="containers-list" class="list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h3>Stack controls</h3>
+            </div>
+            <div class="button-grid">
+              <button data-action="stack-start">Start</button>
+              <button class="secondary" data-action="stack-stop">Stop</button>
+              <button class="secondary" data-action="stack-status">Status</button>
+              <button class="danger" data-action="stack-down">Down</button>
+            </div>
+            <pre id="command-output" class="command-output hidden"></pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-tokens" class="tab-panel hidden">
+        <section class="panel">
+          <form id="token-form" class="toolbar">
+            <input id="token-name" placeholder="Token name" required>
+            <input id="token-limit" inputmode="numeric" placeholder="Limit, empty for unlimited">
+            <label class="check"><input id="token-unlimited" type="checkbox" checked> Unlimited</label>
+            <button type="submit">Create token</button>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Tokens</h3>
+            <button class="secondary small" data-action="load-tokens">Reload</button>
           </div>
-        </div>
-      </div>
+          <div id="tokens-list" class="list"></div>
+        </section>
+      </section>
 
-      <div id="tab-tokens" class="tab hidden">
-        <div class="panel formline">
-          <input id="tok-name" placeholder="Имя токена">
-          <input id="tok-limit" placeholder="Лимит токенов">
-          <label><input id="tok-unlimited" type="checkbox" checked> Безлимит</label>
-          <button onclick="createToken()">Создать</button>
-        </div>
-        <div class="panel">
-          <h3>Токены и расходы</h3>
-          <div id="tokens-list"></div>
-        </div>
-      </div>
-
-      <div id="tab-users" class="tab hidden">
-        <div class="panel formline">
-          <input id="new-user" placeholder="Логин">
-          <input id="new-pass" placeholder="Пароль">
-          <button onclick="createUser()">Создать</button>
-        </div>
-        <div class="panel">
-          <h3>Пользователи</h3>
-          <div id="users-list"></div>
-        </div>
-      </div>
-
-      <div id="tab-models" class="tab hidden">
-        <div class="grid two">
-          <div class="panel">
-            <h3>Local GGUF</h3>
-            <div id="models-local"></div>
+      <section id="tab-users" class="tab-panel hidden">
+        <section class="panel">
+          <form id="user-form" class="toolbar">
+            <input id="new-user" placeholder="Login" required>
+            <input id="new-pass" type="password" placeholder="Password" required>
+            <button type="submit">Create user</button>
+          </form>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Users</h3>
+            <button class="secondary small" data-action="load-users">Reload</button>
           </div>
-          <div class="panel">
-            <h3>HuggingFace</h3>
-            <input id="hf-repo" placeholder="Repo">
-            <input id="hf-include" placeholder="Include">
-            <input id="hf-dir" placeholder="Local dir">
-            <button onclick="downloadModel()">Скачать</button>
-            <pre id="jobs"></pre>
-          </div>
-        </div>
-        <div class="panel drop">
-          <h3>Drag & drop GGUF</h3>
-          <p>Перетащи .gguf или выбери файл</p>
-          <input type="file" accept=".gguf" onchange="uploadModel(this.files[0])">
-        </div>
-      </div>
+          <div id="users-list" class="list"></div>
+        </section>
+      </section>
 
-      <div id="tab-settings" class="tab hidden">
-        <div class="grid two">
-          <div class="panel">
+      <section id="tab-models" class="tab-panel hidden">
+        <div class="split">
+          <section class="panel">
+            <div class="panel-head">
+              <h3>Local GGUF</h3>
+              <button class="secondary small" data-action="load-models">Reload</button>
+            </div>
+            <div id="models-local" class="list"></div>
+          </section>
+          <section class="panel">
+            <h3>Download from HuggingFace</h3>
+            <form id="hf-form" class="stack-form">
+              <input id="hf-repo" placeholder="Repo, e.g. Qwen/Qwen2.5-Coder-7B-Instruct-GGUF" required>
+              <input id="hf-include" placeholder="Include pattern, e.g. *q4_k_m.gguf">
+              <input id="hf-dir" placeholder="Local directory name">
+              <button type="submit">Download</button>
+            </form>
+            <div class="upload-line">
+              <input id="gguf-file" type="file" accept=".gguf">
+              <button class="secondary" data-action="upload-model">Upload GGUF</button>
+            </div>
+          </section>
+        </div>
+        <section class="panel">
+          <h3>Catalog</h3>
+          <div id="models-catalog" class="catalog-grid"></div>
+          <pre id="jobs-output" class="command-output hidden"></pre>
+        </section>
+      </section>
+
+      <section id="tab-settings" class="tab-panel hidden">
+        <form id="settings-form" class="split">
+          <section class="panel">
             <h3>System prompt</h3>
-            <textarea id="prompt" rows="10"></textarea>
-            <button onclick="saveSettings()">Сохранить</button>
-          </div>
-          <div class="panel">
+            <textarea id="prompt" rows="12"></textarea>
+          </section>
+          <section class="panel">
             <h3>llama.cpp args</h3>
-            <input id="CTX_SIZE" placeholder="-c">
-            <input id="THREADS" placeholder="-t">
-            <input id="PARALLEL_SLOTS" placeholder="-np">
-            <input id="N_GPU_LAYERS" placeholder="--n-gpu-layers">
-            <input id="LLAMA_TIMEOUT" placeholder="--timeout">
-            <button onclick="saveSettings(true)">Сохранить и restart</button>
-          </div>
-        </div>
-      </div>
-
-      <div id="tab-clients" class="tab hidden">
-        <div class="panel">
-          <h3>Clients</h3>
-          <div id="clients"></div>
-        </div>
-      </div>
-
-      <div id="tab-updates" class="tab hidden">
-        <div class="panel update-panel">
-          <div class="update-hero">
-            <div>
-              <span id="update-state" class="status-badge">Проверка</span>
-              <h3 id="update-title">Проверка обновлений</h3>
-              <p id="update-copy" class="muted">Сравниваю локальную версию с GitHub.</p>
+            <label><span>CTX_SIZE</span><input id="CTX_SIZE"></label>
+            <label><span>THREADS</span><input id="THREADS"></label>
+            <label><span>PARALLEL_SLOTS</span><input id="PARALLEL_SLOTS"></label>
+            <label><span>N_GPU_LAYERS</span><input id="N_GPU_LAYERS"></label>
+            <label><span>LLAMA_TIMEOUT</span><input id="LLAMA_TIMEOUT"></label>
+            <div class="button-grid">
+              <button type="submit">Save</button>
+              <button type="button" class="secondary" data-action="save-settings-restart">Save and restart</button>
             </div>
-            <div class="update-actions">
-              <button class="secondary" onclick="loadUpdate(true)">Проверить</button>
-              <button id="update-apply" onclick="applyUpdate()">Загрузить и перезапустить</button>
+          </section>
+        </form>
+      </section>
+
+      <section id="tab-clients" class="tab-panel hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h3>Clients</h3>
+            <button class="secondary small" data-action="load-clients">Reload</button>
+          </div>
+          <div id="clients-list" class="list"></div>
+        </section>
+      </section>
+
+      <section id="tab-updates" class="tab-panel hidden">
+        <section class="panel update-panel">
+          <div class="update-head">
+            <div>
+              <span id="update-state" class="status">Checking</span>
+              <h3 id="update-title">Checking for updates</h3>
+              <p id="update-copy" class="muted">Comparing this install with GitHub.</p>
+            </div>
+            <div class="button-row">
+              <button class="secondary" data-action="load-update">Check</button>
+              <button id="update-apply" data-action="apply-update" disabled>Download and restart</button>
             </div>
           </div>
           <div class="version-grid">
-            <div class="version-card">
-              <span>Установлено</span>
-              <b id="update-current">...</b>
-              <small id="update-current-msg">...</small>
-            </div>
-            <div class="version-card">
-              <span>На GitHub</span>
-              <b id="update-latest">...</b>
-              <small id="update-latest-msg">...</small>
-            </div>
-            <div class="version-card">
-              <span>Ветка</span>
-              <b id="update-branch">...</b>
-              <small id="update-remote">...</small>
-            </div>
+            <div><span>Installed</span><strong id="update-current">...</strong><small id="update-current-msg">...</small></div>
+            <div><span>GitHub</span><strong id="update-latest">...</strong><small id="update-latest-msg">...</small></div>
+            <div><span>Branch</span><strong id="update-branch">...</strong><small id="update-remote">...</small></div>
           </div>
-          <div id="update-progress" class="progress-box hidden"></div>
-        </div>
-      </div>
+          <pre id="update-progress" class="command-output hidden"></pre>
+        </section>
+      </section>
 
-      <div id="tab-logs" class="tab hidden">
-        <div class="panel formline">
-          <select id="log-service">
-            <option>llama-server-coder</option>
-            <option>token-gateway</option>
-            <option>nginx</option>
-            <option>admin-ui</option>
-          </select>
-          <button onclick="loadLogs()">Обновить</button>
-        </div>
-        <pre id="logs" class="logs"></pre>
-      </div>
-    </section>
+      <section id="tab-logs" class="tab-panel hidden">
+        <section class="panel">
+          <form id="logs-form" class="toolbar">
+            <select id="log-service">
+              <option>admin-ui</option>
+              <option>nginx</option>
+              <option>local-ai-nginx</option>
+              <option>token-gateway</option>
+              <option>llama-server-coder</option>
+              <option>postgres</option>
+            </select>
+            <button type="submit">Load logs</button>
+          </form>
+          <pre id="logs-output" class="logs"></pre>
+        </section>
+      </section>
+    </main>
   </section>
 
-  <script src="static/app.js"></script>
+  <script src="static/app.js?v=5"></script>
 </body>
 </html>

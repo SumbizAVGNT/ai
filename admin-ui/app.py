@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -358,8 +359,35 @@ def token_gateway_headers() -> dict[str, str]:
         raise HTTPException(status_code=500, detail="TOKEN_GATEWAY_ADMIN_KEY is not configured")
     return {"Authorization": f"Bearer {TOKEN_GATEWAY_ADMIN_KEY}"}
 
+
+def response_payload(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except Exception:
+        return {"detail": response.text or f"HTTP {response.status_code}"}
+
+
+async def token_gateway_request(method: str, path: str, json_data: Optional[dict[str, Any]] = None, timeout: int = 30) -> httpx.Response:
+    headers = token_gateway_headers()
+    if json_data is not None:
+        headers = {**headers, "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        return await client.request(method, f"{TOKEN_GATEWAY_URL}{path}", headers=headers, json=json_data)
+
+
+async def token_gateway_json(method: str, path: str, json_data: Optional[dict[str, Any]] = None, timeout: int = 30) -> JSONResponse:
+    try:
+        response = await token_gateway_request(method, path, json_data=json_data, timeout=timeout)
+    except Exception as exc:
+        return JSONResponse({"detail": f"token-gateway is not reachable: {exc}"}, status_code=502)
+    return JSONResponse(response_payload(response), status_code=response.status_code)
+
 @app.get("/")
 def root():
+    return FileResponse(APP_DIR / "static" / "index.html")
+
+@app.get("/ui")
+def ui_page_no_slash():
     return FileResponse(APP_DIR / "static" / "index.html")
 
 @app.get("/ui/")
@@ -379,13 +407,13 @@ async def api_login(request: Request, db: Session = Depends(get_db)):
     if not user or not user.enabled or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     resp = JSONResponse({"ok": True, "username": user.username})
-    resp.set_cookie("lai_session", make_session(user.id), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 14)
+    resp.set_cookie("lai_session", make_session(user.id), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 14, path="/")
     return resp
 
 @app.post("/api/logout")
 def api_logout():
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie("lai_session")
+    resp.delete_cookie("lai_session", path="/")
     return resp
 
 @app.get("/api/users")
@@ -436,34 +464,46 @@ def api_delete_user(user_id: int, current: User = Depends(current_user), db: Ses
 
 @app.get("/api/tokens")
 async def api_tokens(_: User = Depends(current_user)):
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{TOKEN_GATEWAY_URL}/admin/tokens", headers=token_gateway_headers())
-    return JSONResponse(r.json(), status_code=r.status_code)
+    return await token_gateway_json("GET", "/admin/tokens")
 
 @app.post("/api/tokens")
 async def api_create_token(request: Request, _: User = Depends(current_user)):
     data = await request.json()
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(f"{TOKEN_GATEWAY_URL}/admin/tokens", headers={**token_gateway_headers(), "Content-Type": "application/json"}, json=data)
-    return JSONResponse(r.json(), status_code=r.status_code)
+    return await token_gateway_json("POST", "/admin/tokens", json_data=data)
 
 @app.patch("/api/tokens/{key}")
 async def api_update_token(key: str, request: Request, _: User = Depends(current_user)):
     data = await request.json()
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.patch(f"{TOKEN_GATEWAY_URL}/admin/tokens/{key}", headers={**token_gateway_headers(), "Content-Type": "application/json"}, json=data)
-    return JSONResponse(r.json(), status_code=r.status_code)
+    return await token_gateway_json("PATCH", f"/admin/tokens/{key}", json_data=data)
 
 @app.delete("/api/tokens/{key}")
 async def api_delete_token(key: str, _: User = Depends(current_user)):
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.delete(f"{TOKEN_GATEWAY_URL}/admin/tokens/{key}", headers=token_gateway_headers())
-    return JSONResponse(r.json(), status_code=r.status_code)
+    return await token_gateway_json("DELETE", f"/admin/tokens/{key}")
 
 @app.get("/api/settings")
-def api_get_settings(_: User = Depends(current_user)):
+async def api_get_settings(_: User = Depends(current_user)):
     env = env_parse()
-    return {"env": env, "public_base_url": PUBLIC_BASE_URL, "model_path": env.get("MODEL_PATH", ""), "prompt": env.get("ANTI_CONFIRM_SYSTEM_PROMPT", ""), "llama": {k: env.get(k, d) for k, d in {"CTX_SIZE":"32768", "THREADS":"16", "PARALLEL_SLOTS":"1", "N_GPU_LAYERS":"0", "LLAMA_TIMEOUT":"1200"}.items()}}
+    gateway_config: dict[str, Any] = {}
+    gateway_error = ""
+    try:
+        response = await token_gateway_request("GET", "/admin/config", timeout=10)
+        if response.status_code == 200:
+            payload = response_payload(response)
+            if isinstance(payload, dict):
+                gateway_config = payload
+        else:
+            gateway_error = str(response_payload(response))
+    except Exception as exc:
+        gateway_error = str(exc)
+    return {
+        "env": env,
+        "gateway_config": gateway_config,
+        "gateway_error": gateway_error,
+        "public_base_url": PUBLIC_BASE_URL,
+        "model_path": env.get("MODEL_PATH", ""),
+        "prompt": gateway_config.get("system_prompt") or env.get("ANTI_CONFIRM_SYSTEM_PROMPT", ""),
+        "llama": {k: env.get(k, d) for k, d in {"CTX_SIZE":"32768", "THREADS":"16", "PARALLEL_SLOTS":"1", "N_GPU_LAYERS":"0", "LLAMA_TIMEOUT":"1200"}.items()},
+    }
 
 @app.post("/api/settings")
 async def api_save_settings(request: Request, _: User = Depends(current_user)):
@@ -471,7 +511,17 @@ async def api_save_settings(request: Request, _: User = Depends(current_user)):
     allowed = {"ANTI_CONFIRM_SYSTEM_PROMPT", "CTX_SIZE", "THREADS", "PARALLEL_SLOTS", "N_GPU_LAYERS", "LLAMA_TIMEOUT", "MODEL_PATH", "MODEL_ID"}
     to_write = {k: v for k, v in data.items() if k in allowed}
     env_write(to_write)
-    return {"ok": True, "saved": sorted(to_write.keys())}
+    gateway_config = None
+    gateway_error = ""
+    if "ANTI_CONFIRM_SYSTEM_PROMPT" in to_write:
+        try:
+            response = await token_gateway_request("PATCH", "/admin/config", json_data={"system_prompt": str(to_write["ANTI_CONFIRM_SYSTEM_PROMPT"])}, timeout=15)
+            gateway_config = response_payload(response)
+            if response.status_code >= 400:
+                gateway_error = str(gateway_config)
+        except Exception as exc:
+            gateway_error = str(exc)
+    return {"ok": True, "saved": sorted(to_write.keys()), "gateway_config": gateway_config, "gateway_error": gateway_error}
 
 def docker_stats_summary(raw: dict) -> dict:
     try:
@@ -624,4 +674,11 @@ def api_enable_client(client: str, _: User = Depends(current_user)):
     if client not in mapping:
         raise HTTPException(status_code=400, detail="unknown client")
     args, service = mapping[client]
-    return {"ok": True, "service": service, "result": run_compose(args, timeout=600)}
+    compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8") if (PROJECT_ROOT / "docker-compose.yml").exists() else ""
+    enable_result = None
+    if f"{service}:" not in compose_text:
+        enable_result = run_cmd([sys.executable, "scripts/client_manager.py", "enable", client], timeout=30)
+        if enable_result["returncode"] != 0:
+            return {"ok": False, "service": service, "enable": enable_result, "result": None}
+    result = run_compose(args, timeout=600)
+    return {"ok": result["returncode"] == 0, "service": service, "enable": enable_result, "result": result}

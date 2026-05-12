@@ -232,7 +232,7 @@ def missing_docker_result(args: list[str]) -> dict[str, Any]:
         "stdout": "",
         "stderr": (
             "Docker CLI is not installed inside the admin-ui container. "
-            "Pull the latest code and rebuild admin-ui: docker compose build --no-cache admin-ui && docker compose up -d admin-ui nginx"
+            "Pull the latest code and restart through the installer: git pull && ./install.sh start"
         ),
     }
 
@@ -355,7 +355,7 @@ def run_compose_up_sequential(force_recreate: bool = False, services: Optional[l
                 stdout.append(f"Removed old conflicting container {item['name']} ({item['id']}) before starting {service}.\n")
             for error in cleanup["errors"]:
                 stderr.append(error + "\n")
-            args = ["up", "-d", "--no-build"]
+            args = ["up", "-d", "--no-build", "--no-deps"]
             if force_recreate:
                 args.append("--force-recreate")
             args.append(service)
@@ -954,9 +954,9 @@ def api_clients(_: User = Depends(current_user)):
 @app.post("/api/clients/{client}/enable")
 def api_enable_client(client: str, _: User = Depends(current_user)):
     mapping = {
-        "opencode": (["--profile", "tools", "up", "-d", "--build", "opencode-server"], "opencode-server"),
-        "codex": (["--profile", "tools", "up", "-d", "--build", "codex-runner"], "codex-runner"),
-        "claude": (["--profile", "claude", "up", "-d", "--build", "claude-code-proxy"], "claude-code-proxy"),
+        "opencode": (["--profile", "tools", "up", "-d", "--build", "--no-deps", "opencode-server"], "opencode-server"),
+        "codex": (["--profile", "tools", "up", "-d", "--build", "--no-deps", "codex-runner"], "codex-runner"),
+        "claude": (["--profile", "claude", "up", "-d", "--build", "--no-deps", "claude-code-proxy"], "claude-code-proxy"),
     }
     if client not in mapping:
         raise HTTPException(status_code=400, detail="unknown client")

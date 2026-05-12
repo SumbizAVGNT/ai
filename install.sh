@@ -143,9 +143,9 @@ compose_up_sequential() {
     echo "== Up $svc =="
     remove_conflicting_container "$svc"
     if [ "$recreate" = "--force-recreate" ]; then
-      retry_compose up -d --no-build --force-recreate "$svc"
+      retry_compose up -d --no-build --no-deps --force-recreate "$svc"
     else
-      retry_compose up -d --no-build "$svc"
+      retry_compose up -d --no-build --no-deps "$svc"
     fi
   done
 
@@ -354,7 +354,7 @@ EOF
       13) renew_certs; pause_menu ;;
       14) backup_stack; pause_menu ;;
       15) doctor_stack || true; pause_menu ;;
-      16) regenerate_nginx; need_docker; docker compose up -d --force-recreate nginx; pause_menu ;;
+      16) regenerate_nginx; need_docker; remove_conflicting_container nginx; docker compose up -d --no-deps --force-recreate nginx; pause_menu ;;
       0|q|quit|exit) exit 0 ;;
       *) echo "Unknown choice"; pause_menu ;;
     esac

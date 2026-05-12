@@ -98,7 +98,7 @@ def docker_compose_up(args, attempts=3):
     for service in services:
         print(f"\n== Up {service} ==")
         remove_conflicting_container(service)
-        up_args = ["up", "-d", "--no-build"]
+        up_args = ["up", "-d", "--no-build", "--no-deps"]
         if force_recreate:
             up_args.append("--force-recreate")
         up_args.append(service)

@@ -1,28 +1,28 @@
 ```
-# Build artifacts
-dist/
-build/
-*.min.js
-*.min.css
-*.bundle.js
+# Compiled Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
-# Dependencies
-node_modules/
-
-# Logs and temp files
-*.log
-*.tmp
-
-# Environment
+# Virtual environments
+venv/
+.venv/
 .env
 .env.local
 *.env.*
 
-# Editors
+# Logs
+*.log
+
+# Editor/IDE files
 .vscode/
 .idea/
+*.swp
+*.swo
+*.tmp
 
-# OS generated files
-.DS_Store
-Thumbs.db
+# Build artifacts
+build/
+dist/
 ```

@@ -1,126 +1,129 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<div class="container-fluid">
-    <div class="row g-4 mb-4">
-        <!-- Total Used Tokens -->
-        <div class="col-md-6 col-lg-3">
-            <div class="card h-100 bg-primary text-white">
-                <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-white-50"><i class="fas fa-coins"></i> Total Used Tokens</h6>
-                    <h2 class="display-4 fw-bold">{{ total_used }}</h2>
-                    <span class="badge bg-light text-dark">gateway accounting</span>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Prompt Speed -->
-        <div class="col-md-6 col-lg-3">
-            <div class="card h-100 bg-success text-white">
-                <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-white-50"><i class="fas fa-tachometer-alt"></i> Prompt Speed</h6>
-                    <h2 class="display-4 fw-bold">{{ metrics.prompt_tps or 0 }}</h2>
-                    <span class="badge bg-light text-dark">tokens/sec</span>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Current Model -->
-        <div class="col-md-6 col-lg-3">
-            <div class="card h-100 bg-info text-white">
-                <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-white-50"><i class="fas fa-brain"></i> Current Model</h6>
-                    <h5 class="fw-bold word-break">{{ current_model.name if current_model else 'not set' }}</h5>
-                    <small class="text-white-50">{{ current_model if current_model else '' }}</small>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Llama Timing -->
-        <div class="col-md-6 col-lg-3">
-            <div class="card h-100 bg-warning text-dark">
-                <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-dark-50"><i class="fas fa-clock"></i> Last Prompt</h6>
-                    <h2 class="display-4 fw-bold">{{ metrics.last_prompt_tokens }}</h2>
-                    <p class="mb-0 small">Est: {{ metrics.estimate_sec or 'n/a' }}s · {{ metrics.eval_tps or 0 }} tok/s</p>
-                </div>
-            </div>
-        </div>
+
+<!-- Hero / Stack Summary -->
+<div class="hero-panel">
+    <div>
+        <h4 class="eyebrow">Stack Overview</h4>
+        <h2>Local AI Gateway</h2>
+        <p>Runtime health, active model, and gateway accounting at a glance.</p>
     </div>
-    
-    <div class="row g-4">
-        <!-- Services Table -->
-        <div class="col-lg-8">
-            <div class="card h-100">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-server"></i> Services</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-dark table-striped table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Status</th>
-                                    <th>Ports</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for s in services %}
-                                <tr>
-                                    <td>{{ s.name }}</td>
-                                    <td><span class="badge {% if s.status == 'running' %}bg-success{% elif s.status == 'stopped' %}bg-danger{% else %}bg-warning{% endif %}">{{ s.status }}</span></td>
-                                    <td>{{ s.ports }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Tokens Table -->
-        <div class="col-lg-4">
-            <div class="card h-100">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-key"></i> Tokens</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-dark table-sm mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Key</th>
-                                    <th>Used</th>
-                                    <th>Limit</th>
-                                    <th>On</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for t in tokens %}
-                                <tr>
-                                    <td>{{ t.name }}</td>
-                                    <td><code>{{ t.key[:14] }}...</code></td>
-                                    <td>{{ t.used_tokens }}</td>
-                                    <td>{% if t.unlimited %}∞{% else %}{{ t.limit_tokens }}{% endif %}</td>
-                                    <td>{% if t.enabled %}<i class="fas fa-check text-success"></i>{% else %}<i class="fas fa-times text-danger"></i>{% endif %}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="card-footer">
-                    <a href="{{ base }}/tokens" class="btn btn-primary btn-sm w-100"><i class="fas fa-plus"></i> Manage Tokens</a>
-                </div>
-            </div>
-        </div>
+    <div class="hero-pills">
+        <div class="hero-pill">backend: cpu</div>
+        <div class="hero-pill">model: {{ current_model.name if current_model else 'not selected' }}</div>
+        <div class="hero-pill">url: {{ base }}/v1</div>
     </div>
 </div>
 
-<style>
-.word-break { word-break: break-all; }
-</style>
+<!-- Stats Grid -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Total Used Tokens</div>
+        <div class="stat-value">{{ total_used | default('0') | int }}</div>
+        <div class="stat-trend up">gateway accounting</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Prompt Speed</div>
+        <div class="stat-value">{{ metrics.prompt_tps | default(0) }} tok/s</div>
+        <div class="stat-trend">real-time eval</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Last Prompt Timing</div>
+        <div class="stat-value">{{ metrics.estimate_sec | default('n/a') }}s</div>
+        <div class="stat-trend">{{ metrics.last_prompt_tokens | default(0) }} tokens · {{ metrics.eval_tps | default(0) }} tok/s</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Current Model</div>
+        <div class="stat-value" style="font-size:16px;">{{ current_model.name if current_model else 'not set' }}</div>
+        <div class="stat-trend muted">{{ current_model.path if current_model else '' }}</div>
+    </div>
+</div>
+
+<!-- Services & Tokens Layout -->
+<div class="grid-2" style="gap: 20px; margin-top: 24px;">
+    
+    <!-- Services Card -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Active Services</h3>
+            <a href="{{ base }}/services" class="btn btn-secondary btn-small">Manage</a>
+        </div>
+        <div class="table-container">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Service</th>
+                        <th>Status</th>
+                        <th>Ports</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in services %}
+                    <tr>
+                        <td><strong>{{ s.name }}</strong></td>
+                        <td>
+                            {% if 'running' in s.status|lower %}
+                                <span class="status good">running</span>
+                            {% elif 'exited' in s.status|lower or 'stopped' in s.status|lower %}
+                                <span class="status warn">stopped</span>
+                            {% else %}
+                                <span class="status neutral">{{ s.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td><code>{{ s.ports or '-' }}</code></td>
+                    </tr>
+                    {% endfor %}
+                    {% if not services %}
+                    <tr><td colspan="3" class="empty-state">No services detected</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Tokens Card -->
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Recent Tokens</h3>
+            <a href="{{ base }}/tokens" class="btn btn-primary btn-small">Manage Tokens</a>
+        </div>
+        <div class="table-container">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Used / Limit</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in tokens %}
+                    <tr>
+                        <td>
+                            <strong>{{ t.name }}</strong>
+                            <small><code>{{ t.key[:14] }}...</code></small>
+                        </td>
+                        <td>
+                            {{ t.used_tokens }} / {% if t.unlimited %}∞{% else %}{{ t.limit_tokens }}{% endif %}
+                        </td>
+                        <td>
+                            {% if t.enabled %}
+                                <span class="status good">enabled</span>
+                            {% else %}
+                                <span class="status bad">disabled</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not tokens %}
+                    <tr><td colspan="3" class="empty-state">No tokens created</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
 {% endblock %}

@@ -1,96 +1,102 @@
 {% extends "base.html" %}
 {% block title %}Tokens{% endblock %}
 {% block content %}
-<div class="container-fluid">
-    {% if message %}
-    <div class="alert alert-info"><i class="fas fa-info-circle"></i> {{ message }}</div>
-    {% endif %}
-    
-    <div class="row g-4">
-        <!-- Create Token Form -->
-        <div class="col-lg-4">
-            <div class="card">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-plus-circle"></i> Create Token</h5>
-                </div>
-                <div class="card-body">
-                    <form method="post" action="{{ base }}/tokens/create">
-                        <div class="mb-3">
-                            <label class="form-label">Name</label>
-                            <input name="name" class="form-control" required placeholder="my-token">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Token Limit</label>
-                            <input name="limit_tokens" class="form-control" placeholder="100000">
-                        </div>
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" name="unlimited" class="form-check-input" id="unlimitedCheck" checked>
-                            <label class="form-check-label" for="unlimitedCheck">Unlimited</label>
-                        </div>
-                        <button type="submit" class="btn btn-primary w-100"><i class="fas fa-plus"></i> Create</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Tokens Table -->
-        <div class="col-lg-8">
-            <div class="card">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-key"></i> Token List</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-dark table-striped table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Key</th>
-                                    <th>Used</th>
-                                    <th>Limit</th>
-                                    <th>Remaining</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for t in tokens %}
-                                <tr>
-                                    <form method="post" action="{{ base }}/tokens/{{ t.key }}/update">
-                                        <td><input name="name" class="form-control form-control-sm" value="{{ t.name }}"></td>
-                                        <td><code>{{ t.key }}</code></td>
-                                        <td>{{ t.used_tokens }}</td>
-                                        <td><input name="limit_tokens" class="form-control form-control-sm" value="{{ t.limit_tokens or '' }}" style="width:120px"></td>
-                                        <td>{% if t.unlimited %}∞{% else %}{{ t.remaining_tokens }}{% endif %}</td>
-                                        <td>
-                                            <div class="form-check form-switch">
-                                                <input type="checkbox" name="enabled" class="form-check-input" {% if t.enabled %}checked{% endif %}>
-                                            </div>
-                                            <div class="form-check form-switch">
-                                                <input type="checkbox" name="unlimited" class="form-check-input" {% if t.unlimited %}checked{% endif %}>
-                                                <label class="form-check-label small">∞</label>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <div class="btn-group btn-group-sm">
-                                                <button type="submit" class="btn btn-secondary"><i class="fas fa-save"></i></button>
-                                            </div>
-                                            <form method="post" action="{{ base }}/tokens/{{ t.key }}/reset" class="d-inline">
-                                                <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-redo"></i></button>
-                                            </form>
-                                            <form method="post" action="{{ base }}/tokens/{{ t.key }}/delete" class="d-inline" onsubmit="return confirm('Delete this token?')">
-                                                <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i></button>
-                                            </form>
-                                        </td>
-                                    </form>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
+
+<!-- Server Message -->
+{% if message %}
+<div class="alert {% if 'error' in message|lower %}alert-error{% else %}alert-success{% endif %}">
+    {{ message }}
+</div>
+{% endif %}
+
+<!-- Hero Panel -->
+<div class="hero-panel">
+    <div>
+        <h4 class="eyebrow">Access Management</h4>
+        <h2>API Tokens</h2>
+        <p>Create and manage authentication keys for the OpenAI-compatible endpoint. Tokens control usage limits and access.</p>
     </div>
 </div>
+
+<!-- Create Token Form -->
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
+        <h3 class="card-title">Create New Token</h3>
+    </div>
+    <form id="token-form" class="stack-form" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; align-items: end;">
+        <div class="form-group" style="margin:0;">
+            <label class="form-label" for="token-name">Name</label>
+            <input type="text" id="token-name" class="form-input" placeholder="my-token" value="token" required>
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label class="form-label" for="token-limit">Token Limit</label>
+            <input type="number" id="token-limit" class="form-input" placeholder="100000" min="1">
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 16px;">
+            <label class="form-checkbox">
+                <input type="checkbox" id="token-unlimited" checked>
+                <span>Unlimited</span>
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary" style="height: 42px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Create Token
+        </button>
+    </form>
+</div>
+
+<!-- Token List -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Token List</h3>
+        <button class="btn btn-secondary btn-small" data-action="load-tokens">Reload</button>
+    </div>
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Key</th>
+                    <th>Used</th>
+                    <th>Limit</th>
+                    <th>Remaining</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="tokens-list">
+                {% for t in tokens %}
+                <tr>
+                    <td><strong>{{ t.name }}</strong></td>
+                    <td><code>{{ t.key[:16] }}...</code></td>
+                    <td>{{ t.used_tokens | default(0) | int }}</td>
+                    <td>{% if t.unlimited %}∞{% else %}{{ t.limit_tokens | default(0) | int }}{% endif %}</td>
+                    <td>{% if t.unlimited %}∞{% else %}{{ t.remaining_tokens | default(0) | int }}{% endif %}</td>
+                    <td>
+                        {% if t.enabled %}
+                            <span class="status good">enabled</span>
+                        {% else %}
+                            <span class="status bad">disabled</span>
+                        {% endif %}
+                    </td>
+                    <td class="action-buttons">
+                        <button class="btn btn-secondary btn-small" data-action="token-copy" data-key="{{ t.key }}">Copy</button>
+                        <button class="btn btn-secondary btn-small" data-action="token-toggle" data-key="{{ t.key }}" data-enabled="{{ t.enabled|lower }}">
+                            {{ 'Disable' if t.enabled else 'Enable' }}
+                        </button>
+                        <button class="btn btn-secondary btn-small" data-action="token-reset" data-key="{{ t.key }}">Reset</button>
+                        <button class="btn btn-danger btn-small" data-action="token-delete" data-key="{{ t.key }}">Delete</button>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not tokens %}
+                <tr>
+                    <td colspan="7" class="empty-state">No tokens created yet. Use the form above to generate your first API key.</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
 {% endblock %}

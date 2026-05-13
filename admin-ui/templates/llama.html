@@ -1,58 +1,78 @@
 {% extends "base.html" %}
-{% block title %}Llama Settings{% endblock %}
+{% block title %}Llama / Prompt{% endblock %}
 {% block content %}
-<div class="container-fluid">
-    {% if message %}
-    <div class="alert alert-info"><i class="fas fa-info-circle"></i> {{ message }}</div>
-    {% endif %}
-    
-    <div class="row">
-        <div class="col-lg-8">
-            <div class="card">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-cog"></i> Llama Server Configuration</h5>
-                </div>
-                <div class="card-body">
-                    <form method="post" action="{{ base }}/llama">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="form-label">Context Size (-c)</label>
-                                <input name="ctx_size" class="form-control" value="{{ env.CTX_SIZE or '32768' }}">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Threads (-t)</label>
-                                <input name="threads" class="form-control" value="{{ env.THREADS or '16' }}">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Parallel Slots (-np)</label>
-                                <input name="parallel_slots" class="form-control" value="{{ env.PARALLEL_SLOTS or '1' }}">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">GPU Layers (--n-gpu-layers)</label>
-                                <input name="n_gpu_layers" class="form-control" value="{{ env.N_GPU_LAYERS or '0' }}">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Timeout (seconds)</label>
-                                <input name="llama_timeout" class="form-control" value="{{ env.LLAMA_TIMEOUT or '1200' }}">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Extra Args</label>
-                                <input name="llama_extra_args" class="form-control" value="{{ env.LLAMA_EXTRA_ARGS or '' }}" placeholder="--flash-attn on">
-                            </div>
-                        </div>
-                        <hr>
-                        <div class="form-check mb-3">
-                            <input type="checkbox" name="restart" class="form-check-input" id="restartCheck" checked>
-                            <label class="form-check-label" for="restartCheck">Restart llama after save</label>
-                        </div>
-                        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Settings</button>
-                    </form>
-                </div>
-                <div class="card-footer text-muted small">
-                    <i class="fas fa-info-circle"></i> Settings are stored in config/llama.env. Model path should normally be /models/current.gguf for dynamic switching.
-                </div>
+
+<!-- Server Message -->
+{% if message %}
+<div class="alert {% if 'error' in message|lower %}alert-error{% else %}alert-success{% endif %}">
+    {{ message }}
+</div>
+{% endif %}
+
+<!-- Hero Panel -->
+<div class="hero-panel">
+    <div>
+        <h4 class="eyebrow">Runtime Configuration</h4>
+        <h2>Llama.cpp Server Settings</h2>
+        <p>Adjust context size, threading, GPU offloading and system prompt. Changes are applied to the running stack.</p>
+    </div>
+</div>
+
+<!-- Settings Form -->
+<div class="card">
+    <form method="POST" class="stack-form">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+            <div class="form-group">
+                <label class="form-label" for="ctx_size">Context Size (-c)</label>
+                <input type="number" id="ctx_size" name="ctx_size" class="form-input" value="{{ ctx_size or 32768 }}" min="512" step="256">
             </div>
+            <div class="form-group">
+                <label class="form-label" for="threads">Threads (-t)</label>
+                <input type="number" id="threads" name="threads" class="form-input" value="{{ threads or 16 }}" min="1">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="parallel_slots">Parallel Slots (-np)</label>
+                <input type="number" id="parallel_slots" name="parallel_slots" class="form-input" value="{{ parallel_slots or 1 }}" min="1">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="n_gpu_layers">GPU Layers (--n-gpu-layers)</label>
+                <input type="number" id="n_gpu_layers" name="n_gpu_layers" class="form-input" value="{{ n_gpu_layers or 0 }}" min="0">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="timeout">Timeout (seconds)</label>
+                <input type="number" id="timeout" name="timeout" class="form-input" value="{{ timeout or 1200 }}" min="60">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="extra_args">Extra Args</label>
+                <input type="text" id="extra_args" name="extra_args" class="form-input" placeholder="--flash-attn" value="{{ extra_args or '' }}">
+            </div>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-top: 16px; padding-top: 20px; border-top: 1px solid var(--border-light);">
+            <label class="form-checkbox">
+                <input type="checkbox" name="restart_llama" {% if restart_llama %}checked{% endif %}>
+                <span>Restart llama-server after save</span>
+            </label>
+            <button type="submit" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                Save Settings
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Info Note -->
+<div class="card" style="margin-top: 20px; background: var(--bg-tertiary); border-color: var(--border-light);">
+    <div style="display: flex; gap: 12px; align-items: start;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="2" style="flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        <div>
+            <h4 style="margin:0 0 6px; font-size:14px; font-weight:600;">Configuration Notes</h4>
+            <p style="margin:0; color:var(--text-secondary); font-size:13px; line-height:1.5;">
+                Settings are stored in <code>config/llama.env</code>. Model path should normally be <code>/models/current.gguf</code> for dynamic switching. 
+                Changes to GPU layers, context size or threading require a container restart to take effect.
+            </p>
         </div>
     </div>
 </div>
+
 {% endblock %}

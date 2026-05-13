@@ -1,35 +1,60 @@
 {% extends "base.html" %}
-{% block title %}Prompt{% endblock %}
+{% block title %}System Prompt{% endblock %}
 {% block content %}
-<div class="container-fluid">
-    {% if message %}
-    <div class="alert alert-info"><i class="fas fa-info-circle"></i> {{ message }}</div>
-    {% endif %}
-    
-    <div class="row">
-        <div class="col-lg-10">
-            <div class="card">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-comment-dots"></i> Gateway Prompt Injection</h5>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted mb-4">
-                        Этот prompt автоматически добавляется в /v1/chat/completions, чтобы модель не просила подтверждение и отвечала сразу.
-                    </p>
-                    <form method="post" action="{{ base }}/prompt">
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" name="inject_system_prompt_enabled" class="form-check-input" id="injectCheck" {% if config.inject_system_prompt_enabled %}checked{% endif %}>
-                            <label class="form-check-label" for="injectCheck">Включено (Enabled)</label>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">System Prompt</label>
-                            <textarea name="system_prompt" class="form-control" rows="8">{{ config.system_prompt }}</textarea>
-                        </div>
-                        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Сохранить (Save)</button>
-                    </form>
-                </div>
-            </div>
+
+<!-- Server Message -->
+{% if message %}
+<div class="alert {% if 'error' in message|lower %}alert-error{% else %}alert-success{% endif %}">
+    {{ message }}
+</div>
+{% endif %}
+
+<!-- Hero Panel -->
+<div class="hero-panel">
+    <div>
+        <h4 class="eyebrow">Gateway Configuration</h4>
+        <h2>System Prompt Injection</h2>
+        <p>This prompt is automatically prepended to <code>/v1/chat/completions</code> to ensure the model responds directly without asking for confirmation.</p>
+    </div>
+</div>
+
+<!-- Settings Form -->
+<div class="card">
+    <form method="POST" class="stack-form">
+        <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 20px;">
+            <label class="toggle" style="cursor: pointer;">
+                <input type="checkbox" name="enabled" {% if config.enabled %}checked{% endif %}>
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span style="font-size: 14px; font-weight: 600;">Enable Prompt Injection</span>
+            </label>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="system_prompt">System Prompt Template</label>
+            <textarea id="system_prompt" name="system_prompt" class="form-textarea" rows="10" placeholder="You are a helpful assistant. Respond directly without asking for confirmation.">{{ config.system_prompt or '' }}</textarea>
+        </div>
+
+        <div style="display: flex; gap: 12px; margin-top: 12px;">
+            <button type="submit" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                Save Changes
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Info Note -->
+<div class="card" style="margin-top: 20px; background: var(--bg-tertiary); border-color: var(--border-light);">
+    <div style="display: flex; gap: 12px; align-items: start;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="2" style="flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        <div>
+            <h4 style="margin:0 0 6px; font-size:14px; font-weight:600;">How it works</h4>
+            <p style="margin:0; color:var(--text-secondary); font-size:13px; line-height:1.5;">
+                The gateway injects this system prompt before user input. Use it to enforce output format, bypass local model refusals, or set persistent instructions.
+                Changes apply immediately to new <code>/v1</code> requests.
+            </p>
         </div>
     </div>
 </div>
+
 {% endblock %}

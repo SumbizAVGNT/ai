@@ -1,1125 +1,576 @@
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => [...document.querySelectorAll(selector)];
-const toastKinds = { good: "success", bad: "error", warn: "warning", info: "info" };
-const badgeKinds = { good: "success", bad: "danger", warn: "warning", info: "info" };
+/**
+ * Local AI Admin Panel — Frontend Controller (v3.2)
+ * Адаптировано под новый glassmorphism/neon интерфейс
+ */
 
-const APP_BASE = window.location.pathname === "/ui" || window.location.pathname.startsWith("/ui/")
-  ? "/ui"
-  : "";
+// ==========================================
+// 1. CONSTANTS & STATE
+// ==========================================
+const APP_BASE = window.location.pathname.startsWith('/ui') ? '/ui' : '';
+const API = (path) => `${APP_BASE}/api${path}`;
 
 const state = {
-  tab: "overview",
-  me: null,
-  updateJobId: window.localStorage?.getItem("localAiUpdateJobId") || null,
-  updatePollTimer: null,
-  logsFollowTimer: null,
-  lastLogsText: "",
-  clientsBaseUrl: "",
+  tab: 'dashboard',
+  user: null,
+  updateJobId: localStorage.getItem('localAiUpdateJobId') || null,
+  updateTimer: null,
+  logsTimer: null,
+  lastLogsText: '',
+  clientsBaseUrl: '',
 };
 
-const subtitles = {
-  overview: "Runtime state, services and stack controls.",
-  tokens: "API keys, limits and usage counters.",
-  users: "Admin panel accounts.",
-  models: "Local GGUF models, downloads and uploads.",
-  settings: "Prompt and llama.cpp runtime args.",
-  clients: "OpenAI-compatible client helpers.",
-  updates: "GitHub version checks and update flow.",
-  logs: "Container logs with filter and follow mode.",
+const TAB_TITLES = {
+  dashboard: 'Dashboard',
+  services: 'Service Management',
+  monitoring: 'Resource Monitoring',
+  tokens: 'Token Management',
+  users: 'User Accounts',
+  models: 'Model Library',
+  llama: 'Llama Configuration',
+  clients: 'Client Integrations',
+  logs: 'Container Logs',
 };
 
-function apiPath(path) {
-  return `${APP_BASE}/api${path}`;
-}
+const TAB_SUBTITLES = {
+  dashboard: 'Runtime state, services and stack controls',
+  services: 'Manage Docker containers and compose stack',
+  monitoring: 'Resource usage and performance metrics',
+  tokens: 'API keys, limits and usage counters',
+  users: 'Admin panel accounts management',
+  models: 'Local GGUF models, downloads and uploads',
+  llama: 'Prompt and llama.cpp runtime configuration',
+  clients: 'OpenAI-compatible client helpers',
+  logs: 'Container logs with filter and follow mode',
+};
 
-function formatBytes(value) {
-  const n = Number(value || 0);
-  if (!Number.isFinite(n)) return "-";
-  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
-  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${n} B`;
-}
+// ==========================================
+// 2. UTILITIES
+// ==========================================
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => [...document.querySelectorAll(sel)];
+const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
-function formatBytePair(used, total) {
-  const u = Number(used || 0);
-  const t = Number(total || 0);
-  if (!Number.isFinite(u) || !Number.isFinite(t) || t <= 0) return "-";
-  if (t >= 1024 ** 3) return `${(u / 1024 ** 3).toFixed(1)}/${(t / 1024 ** 3).toFixed(1)} GB`;
-  if (t >= 1024 ** 2) return `${(u / 1024 ** 2).toFixed(1)}/${(t / 1024 ** 2).toFixed(1)} MB`;
-  return `${formatBytes(u)}/${formatBytes(t)}`;
-}
+const formatBytes = (n) => {
+  const num = Number(n || 0);
+  if (!isFinite(num)) return '-';
+  const units = ['B','KB','MB','GB','TB'];
+  let i = 0;
+  while (num >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${num.toFixed(1)} ${units[i]}`;
+};
 
-function formatDuration(seconds) {
-  const total = Math.max(0, Number(seconds || 0));
-  const days = Math.floor(total / 86400);
-  const hours = Math.floor((total % 86400) / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
-}
+const formatDuration = (sec) => {
+  const s = Math.max(0, Number(sec || 0));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+};
 
-function shortValue(value, fallback = "-") {
-  const text = String(value || "").trim();
-  return text || fallback;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  }[ch]));
-}
-
-function errorText(error) {
-  if (!error) return "Unknown error";
-  if (typeof error === "string") return error;
-  return error.message || JSON.stringify(error);
-}
-
-function setText(selector, value) {
-  const el = $(selector);
-  if (el) el.textContent = value;
-  return el;
-}
-
-function setHtml(selector, value) {
-  const el = $(selector);
-  if (el) el.innerHTML = value;
-  return el;
-}
-
-function bind(selector, eventName, handler) {
-  const el = $(selector);
-  if (el) el.addEventListener(eventName, handler);
-}
-
-function appVisible() {
-  const app = $("#app-view");
-  return Boolean(app && !app.classList.contains("hidden"));
-}
-
-function toast(message, kind = "info", timeout = 6000) {
-  const container = $("#toast-container");
+// Toast notifications
+const toast = (msg, type = 'info', timeout = 4500) => {
+  const container = $('#toast-container');
   if (!container) return;
-  const el = document.createElement("div");
-  el.className = `toast ${toastKinds[kind] || kind || "info"}`;
-  el.textContent = message;
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+  el.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ️'}</span><span class="toast-msg">${escapeHtml(msg)}</span>`;
   container.appendChild(el);
-  if (timeout) {
-    window.setTimeout(() => {
-      el.classList.add("is-hiding");
-      window.setTimeout(() => el.remove(), 180);
-    }, timeout);
-  }
-}
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(100%)';
+    setTimeout(() => el.remove(), 300);
+  }, timeout);
+};
 
-function pageError(message) {
-  const el = $("#page-alert");
-  if (!el) return;
-  if (!message) {
-    el.classList.add("hidden");
-    el.textContent = "";
-    return;
-  }
-  el.textContent = message;
-  el.classList.remove("hidden");
-}
-
-function showLogin() {
-  $("#login-view")?.classList.remove("hidden");
-  $("#app-view")?.classList.add("hidden");
-}
-
-function showApp() {
-  $("#login-view")?.classList.add("hidden");
-  $("#app-view")?.classList.remove("hidden");
-}
-
-async function parseResponse(response) {
-  const contentType = response.headers.get("content-type") || "";
-  const text = await response.text();
-  if (contentType.includes("application/json")) {
-    try {
-      return text ? JSON.parse(text) : {};
-    } catch {
-      return { raw: text };
-    }
-  }
-  if (!text) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-async function api(path, options = {}) {
+// API wrapper
+const api = async (path, options = {}) => {
   const isForm = options.body instanceof FormData;
-  const headers = isForm ? {} : { "Content-Type": "application/json" };
-  const response = await fetch(apiPath(path), {
-    credentials: "same-origin",
+  const headers = isForm ? {} : { 'Content-Type': 'application/json' };
+  const res = await fetch(API(path), {
+    credentials: 'same-origin',
     headers: { ...headers, ...(options.headers || {}) },
     ...options,
   });
+  const text = await res.text();
+  const data = text ? (res.headers.get('content-type')?.includes('json') ? JSON.parse(text) : { raw: text }) : {};
+  if (!res.ok) throw new Error(typeof data === 'string' ? data : data.detail || data.error || `HTTP ${res.status}`);
+  return data;
+};
 
-  const payload = await parseResponse(response);
-  if (response.status === 401) {
-    showLogin();
-    throw new Error("Not authenticated");
-  }
-  if (!response.ok) {
-    const detail = payload?.detail || payload?.error || payload?.raw || payload;
-    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
-  }
-  return payload;
-}
+// Safe DOM setters
+const setText = (sel, val) => { const el = $(sel); if (el) el.textContent = val; return el; };
+const setHtml = (sel, val) => { const el = $(sel); if (el) el.innerHTML = val; return el; };
+const renderEmpty = (sel, msg) => setHtml(sel, `<div class="empty-state"><div class="empty-state-icon">📭</div><h4>${escapeHtml(msg)}</h4></div>`);
 
-async function runAction(button, task, successMessage) {
-  const label = button?.innerHTML;
-  if (button) {
-    button.disabled = true;
-    button.dataset.busy = "true";
-    button.innerHTML = `<span class="spinner spinner-inline" aria-hidden="true"></span>Working...`;
-  }
-  pageError("");
-  try {
-    const result = await task();
-    if (successMessage) toast(successMessage, "good");
-    return result;
-  } catch (error) {
-    const message = errorText(error);
-    pageError(message);
-    toast(message, "bad", 9000);
-    throw error;
-  } finally {
-    if (button) {
-      button.disabled = false;
-      delete button.dataset.busy;
-      button.innerHTML = label;
-    }
-  }
-}
+// Modal helpers
+const openModal = (title, body, footer = '') => {
+  $('#modal-title').textContent = title;
+  $('#modal-body').innerHTML = body;
+  $('#modal-footer').innerHTML = footer;
+  $('#modal-backdrop').classList.add('show');
+};
+const closeModal = () => $('#modal-backdrop')?.classList.remove('show');
 
-function renderEmpty(target, message) {
-  setHtml(target, `<div class="empty">${escapeHtml(message)}</div>`);
-}
-
-function showCommandOutput(title, result, target = "#command-output") {
-  const box = $(target);
-  if (!box) return;
-  const stdout = result?.stdout || "";
-  const stderr = result?.stderr || "";
-  const code = result?.returncode ?? "";
-  box.textContent = `${title}\nreturncode: ${code}\n\n${stdout}${stderr}`;
-  box.classList.remove("hidden");
-}
-
-function setActiveTab(tab) {
+// ==========================================
+// 3. NAVIGATION & TABS
+// ==========================================
+const setActiveTab = (tab) => {
   state.tab = tab;
-  if (tab !== "logs") stopLogsFollow();
-  $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
-  $$(".tab-panel").forEach((panel) => panel.classList.add("hidden"));
-  const panel = $(`#tab-${tab}`);
-  if (!panel) return;
-  panel.classList.remove("hidden");
-  setText("#page-title", $(`.nav-item[data-tab="${tab}"]`)?.textContent.trim() || tab);
-  setText("#page-subtitle", subtitles[tab] || "");
-  pageError("");
-  if (window.matchMedia("(max-width: 1024px)").matches) {
-    $("#sidebar")?.classList.remove("open");
-  }
+  $$('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+  $$('.tab-content').forEach(el => el.classList.toggle('active', el.id === `tab-${tab}`));
+  $('#page-title').textContent = TAB_TITLES[tab] || tab;
+  $('#page-subtitle').textContent = TAB_SUBTITLES[tab] || '';
+  $('#page-alert')?.classList.add('hidden');
+  if (window.innerWidth <= 1024) $('#sidebar')?.classList.remove('open');
+  stopLogsFollow();
   loadCurrentTab();
-}
+};
 
-async function loadCurrentTab() {
+const loadCurrentTab = async () => {
   try {
-    if (state.tab === "overview") await loadSystem();
-    if (state.tab === "tokens") await loadTokens();
-    if (state.tab === "users") await loadUsers();
-    if (state.tab === "models") await loadModels();
-    if (state.tab === "settings") await loadSettings();
-    if (state.tab === "clients") await loadClients();
-    if (state.tab === "updates") await loadUpdate(true);
-    if (state.tab === "logs") await loadLogs();
-  } catch (error) {
-    pageError(errorText(error));
-  } finally {
-    syncGlobalSearch();
-  }
-}
-
-async function login() {
-  const loginError = setText("#login-error", "");
-  loginError?.classList.add("hidden");
-  await api("/login", {
-    method: "POST",
-    body: JSON.stringify({
-      username: $("#login-user").value.trim(),
-      password: $("#login-pass").value,
-    }),
-  });
-  await boot();
-}
-
-async function logout() {
-  await api("/logout", { method: "POST" });
-  state.me = null;
-  showLogin();
-}
-
-async function boot() {
-  try {
-    state.me = await api("/me");
-    const username = state.me.username || "admin";
-    setText("#user-pill", username);
-    setText("#user-avatar", username.slice(0, 1).toUpperCase());
-    setText("#user-role", state.me.is_admin ? "Admin session" : "User session");
-    showApp();
-    setActiveTab(state.tab || "overview");
-    loadUpdate(false).catch(() => {});
-    if (state.updateJobId && !state.updatePollTimer) {
-      state.updatePollTimer = window.setInterval(() => pollUpdateJob().catch(() => {}), 2500);
-      pollUpdateJob().catch(() => {});
+    switch (state.tab) {
+      case 'dashboard': await loadSystem(); break;
+      case 'services': await loadServices(); break;
+      case 'monitoring': await loadMonitoring(); break;
+      case 'tokens': await loadTokens(); break;
+      case 'users': await loadUsers(); break;
+      case 'models': await loadModels(); break;
+      case 'llama': await loadSettings(); break;
+      case 'clients': await loadClients(); break;
+      case 'logs': await loadLogs(); break;
     }
-  } catch {
-    showLogin();
+    syncGlobalSearch();
+  } catch (e) {
+    toast(e.message, 'error');
   }
-}
+};
 
-async function loadSystem() {
-  const data = await api("/system");
+// ==========================================
+// 4. DATA LOADERS
+// ==========================================
+const loadSystem = async () => {
+  const data = await api('/system');
   const host = data.host || {};
-  const memory = host.memory || {};
-  const disk = host.disk || {};
   const metrics = data.llama_metrics || {};
   const stack = data.stack || {};
 
-  setText("#metric-cpu", `${Math.round(Number(host.cpu_percent || 0))}%`);
-  setText("#metric-ram", formatBytePair(memory.used, memory.total));
-  setText("#metric-disk", formatBytePair(disk.used, disk.total));
-  setText("#metric-speed", metrics.avg_prompt_tokens_per_second
-    ? `${Number(metrics.avg_prompt_tokens_per_second).toFixed(1)} tok/s`
-    : "-");
-  setText("#metric-eval-speed", metrics.avg_eval_tokens_per_second
-    ? `${Number(metrics.avg_eval_tokens_per_second).toFixed(1)} tok/s`
-    : "-");
-  setText("#metric-uptime", formatDuration(host.uptime_seconds));
-  setText("#hero-backend", `backend: ${shortValue(stack.backend, "cpu")}`);
-  setText("#hero-model", `model: ${shortValue(stack.model_id || stack.model_path, "not selected")}`);
-  setText("#hero-url", `url: ${shortValue(stack.public_base_url, window.location.origin)}`);
+  setText('#metric-cpu', `${Math.round(host.cpu_percent || 0)}%`);
+  setText('#metric-ram', `${formatBytes(host.memory?.used)} / ${formatBytes(host.memory?.total)}`);
+  setText('#metric-speed', metrics.avg_prompt_tokens_per_second ? `${metrics.avg_prompt_tokens_per_second.toFixed(1)} tok/s` : '-');
+  setText('#metric-uptime', formatDuration(host.uptime_seconds));
+  setText('#hero-backend', `backend: ${stack.backend || 'cpu'}`);
+  setText('#hero-model', `model: ${stack.model_id || stack.model_path || 'not selected'}`);
+  setText('#hero-url', `url: ${stack.public_base_url || window.location.origin}`);
 
-  const preferred = [
-    "llama-server-coder",
-    "token-gateway",
-    "admin-ui",
-    "local-ai-nginx",
-    "postgres",
-    "local-ai-postgres",
-    "opencode-server",
-    "codex-runner",
-    "claude-code-proxy",
-    "local-ai-certbot",
-  ];
-  const containers = [...(data.containers || [])].sort((a, b) => {
-    const ai = preferred.indexOf(a.name);
-    const bi = preferred.indexOf(b.name);
-    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi) || a.name.localeCompare(b.name);
+  const preferred = ['llama-server-coder','token-gateway','admin-ui','local-ai-nginx','postgres','local-ai-postgres','opencode-server','codex-runner','claude-code-proxy','local-ai-certbot'];
+  const containers = (data.containers || []).sort((a,b) => {
+    const ai = preferred.indexOf(a.name), bi = preferred.indexOf(b.name);
+    return (ai===-1?999:ai)-(bi===-1?999:bi) || a.name.localeCompare(b.name);
   });
-  if (!containers.length) {
-    renderEmpty("#containers-list", data.docker_error || "No containers found.");
-    return;
+
+  if (!containers.length) return renderEmpty('#containers-table', data.docker_error || 'No containers found');
+  setHtml('#containers-table', containers.map(c => {
+    const run = c.status === 'running';
+    const badHealth = c.health === 'unhealthy';
+    const cls = run && !badHealth ? 'running' : (run ? 'updating' : 'stopped');
+    const stats = c.stats || {};
+    return `<tr>
+      <td><strong>${escapeHtml(c.name)}</strong><br><code>${escapeHtml((c.image||[]).join(', ') || 'unknown')}</code></td>
+      <td><span class="badge ${cls}">${escapeHtml(c.health || c.status)}</span></td>
+      <td>${stats.cpu_percent?.toFixed(1) || 0}%</td>
+      <td>${formatBytes(stats.memory_usage)}</td>
+      <td class="actions">
+        ${run ? `<button class="btn btn-secondary btn-sm" data-action="container-restart" data-container="${escapeHtml(c.name)}">Restart</button>` : ''}
+        <button class="btn btn-secondary btn-sm" data-action="container-logs" data-service="${escapeHtml(c.name)}">Logs</button>
+        ${run && c.name !== 'admin-ui' ? `<button class="btn btn-danger btn-sm" data-action="container-stop" data-container="${escapeHtml(c.name)}">Stop</button>` : `<button class="btn btn-success btn-sm" data-action="container-start" data-container="${escapeHtml(c.name)}" ${run?'disabled':''}>Start</button>`}
+      </td>
+    </tr>`;
+  }).join(''));
+};
+
+const loadServices = async () => {
+  const data = await api('/system');
+  const tbody = $('#tab-services tbody');
+  if (!tbody) return;
+  tbody.innerHTML = (data.containers || []).map(c => {
+    const run = c.status === 'running';
+    return `<tr>
+      <td><strong>${escapeHtml(c.name)}</strong></td>
+      <td><span class="badge ${run?'running':'stopped'}">${escapeHtml(c.status)}</span></td>
+      <td><code>${escapeHtml((c.image||[])[0]||'unknown')}</code></td>
+      <td>-</td>
+      <td class="actions">
+        ${run ? `<button class="btn btn-secondary btn-sm" data-action="container-restart" data-container="${escapeHtml(c.name)}">Restart</button>` : `<button class="btn btn-success btn-sm" data-action="container-start" data-container="${escapeHtml(c.name)}">Start</button>`}
+        <button class="btn btn-secondary btn-sm" data-action="container-logs" data-service="${escapeHtml(c.name)}">Logs</button>
+        ${run && c.name !== 'admin-ui' ? `<button class="btn btn-danger btn-sm" data-action="container-stop" data-container="${escapeHtml(c.name)}">Stop</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty-state">No services detected</td></tr>';
+};
+
+const loadMonitoring = async () => {
+  const data = await api('/system');
+  const host = data.host || {};
+  const metrics = data.llama_metrics || {};
+  const cards = $$('#tab-monitoring .card-value');
+  if (cards[0]) cards[0].textContent = `${Math.round(host.cpu_percent||0)}%`;
+  if (cards[1]) cards[1].textContent = `${((host.memory?.used/host.memory?.total)*100||0).toFixed(1)}%`;
+  if (cards[2]) cards[2].textContent = `${((host.disk?.used/host.disk?.total)*100||0).toFixed(1)}%`;
+
+  const tbody = $('#tab-monitoring .table-wrapper:first-of-type tbody');
+  if (tbody) {
+    tbody.innerHTML = (data.containers||[]).filter(c=>c.status==='running').map(c => {
+      const s = c.stats||{};
+      const ramPct = s.memory_limit ? ((s.memory_usage/s.memory_limit)*100).toFixed(1)+'%' : '-';
+      return `<tr><td><strong>${escapeHtml(c.name)}</strong></td><td><span class="badge running">running</span></td><td>${s.cpu_percent?.toFixed(1)||0}%</td><td>${ramPct}</td><td>${formatBytes(s.memory_usage)}</td></tr>`;
+    }).join('') || '<tr><td colspan="5" class="empty-state">No running containers</td></tr>';
   }
 
-  setHtml("#containers-list", containers.map((container) => {
-    const running = container.status === "running";
-    const health = container.health || "";
-    const healthBad = health === "unhealthy";
-    const statusClass = running && !healthBad ? "good" : (running ? "warn" : "bad");
-    const stats = container.stats || {};
-    const canStop = running && container.name !== "admin-ui";
-    const canRestart = running && container.name !== "admin-ui";
-    const canStart = !running;
-    return `
-      <div class="list-row container-row">
-        <div>
-          <strong>${escapeHtml(container.name)}</strong>
-          <small>${escapeHtml((container.image || []).join(", ") || "image")}</small>
-        </div>
-        <span class="status ${statusClass}">${escapeHtml(health || container.status)}</span>
-        <span>CPU ${escapeHtml(stats.cpu_percent ?? 0)}%</span>
-        <span>${formatBytes(stats.memory_usage)}</span>
-        <span>${running ? "online" : "offline"}</span>
-        <div class="container-actions">
-          <button class="secondary small" data-action="container-logs" data-service="${escapeHtml(container.name)}">Logs</button>
-          <button class="secondary small" data-action="container-start" data-container="${escapeHtml(container.name)}" ${canStart ? "" : "disabled"}>Start</button>
-          <button class="secondary small" data-action="container-restart" data-container="${escapeHtml(container.name)}" ${canRestart ? "" : "disabled"}>Restart</button>
-          <button class="danger small" data-action="container-stop" data-container="${escapeHtml(container.name)}" ${canStop ? "" : "disabled"}>Stop</button>
-        </div>
-      </div>
+  const llama = $('#tab-monitoring .table-wrapper:last-of-type tbody');
+  if (llama) {
+    llama.innerHTML = `
+      <tr><td><strong>Last Prompt Tokens</strong></td><td>${metrics.last_task_tokens||'-'}</td></tr>
+      <tr><td><strong>Prompt Speed</strong></td><td>${metrics.avg_prompt_tokens_per_second?.toFixed(1)||'-'} tok/s</td></tr>
+      <tr><td><strong>Eval Speed</strong></td><td>${metrics.avg_eval_tokens_per_second?.toFixed(1)||'-'} tok/s</td></tr>
+      <tr><td><strong>Estimated Prompt Time</strong></td><td>${metrics.estimated_seconds_for_last_prompt?.toFixed(2)||'-'} sec</td></tr>
     `;
-  }).join(""));
-}
-
-async function stackAction(action) {
-  const result = await api(`/stack/${action}`, { method: "POST" });
-  showCommandOutput(`docker compose ${action}`, result);
-  if (["start", "restart", "stop", "down"].includes(action)) {
-    window.setTimeout(() => loadSystem().catch(() => {}), 1500);
   }
-  return result;
-}
+};
 
-async function containerAction(name, action) {
-  const result = await api(`/containers/${encodeURIComponent(name)}/${encodeURIComponent(action)}`, { method: "POST" });
-  showCommandOutput(`docker ${action} ${name}`, result);
-  window.setTimeout(() => loadSystem().catch(() => {}), 900);
-  return result;
-}
+const loadTokens = async () => {
+  const { tokens = [] } = await api('/tokens');
+  const tbody = $('#tokens-table');
+  if (!tbody) return;
+  if (!tokens.length) return renderEmpty('#tokens-table', 'No tokens yet. Create one above.');
+  tbody.innerHTML = tokens.map(t => `<tr>
+    <td><strong>${escapeHtml(t.name||'token')}</strong></td>
+    <td><code>${escapeHtml(t.key)}</code></td>
+    <td>${(t.used_tokens||0).toLocaleString()}</td>
+    <td>${t.unlimited ? '∞' : (t.limit_tokens||0).toLocaleString()}</td>
+    <td>${t.unlimited ? '∞' : (t.remaining_tokens??0).toLocaleString()}</td>
+    <td><span class="badge ${t.enabled?'running':'disabled'}">${t.enabled?'enabled':'disabled'}</span></td>
+    <td class="actions">
+      <button class="btn btn-secondary btn-sm" data-action="token-toggle" data-key="${escapeHtml(t.key)}" data-enabled="${t.enabled}">${t.enabled?'Disable':'Enable'}</button>
+      <button class="btn btn-secondary btn-sm" data-action="token-reset" data-key="${escapeHtml(t.key)}">Reset</button>
+      <button class="btn btn-danger btn-sm" data-action="token-delete" data-key="${escapeHtml(t.key)}">Delete</button>
+    </td>
+  </tr>`).join('');
+};
 
-async function openContainerLogs(service) {
-  setActiveTab("logs");
-  const select = $("#log-service");
-  if (![...select.options].some((option) => option.value === service)) {
-    const option = document.createElement("option");
-    option.value = service;
-    option.textContent = service;
-    select.appendChild(option);
+const loadUsers = async () => {
+  const { users = [] } = await api('/users');
+  const tbody = $('#users-table');
+  if (!tbody) return;
+  if (!users.length) return renderEmpty('#users-table', 'No users found.');
+  tbody.innerHTML = users.map(u => {
+    const isMe = state.user && Number(state.user.id) === Number(u.id);
+    return `<tr>
+      <td><strong>${escapeHtml(u.id)}</strong></td>
+      <td><strong>${escapeHtml(u.username)}</strong></td>
+      <td><code>${u.is_admin?'admin':'user'}</code></td>
+      <td><span class="badge ${u.enabled?'running':'disabled'}">${u.enabled?'enabled':'disabled'}</span></td>
+      <td class="actions">
+        <button class="btn btn-secondary btn-sm" data-action="user-toggle" data-id="${u.id}" data-enabled="${u.enabled}">${u.enabled?'Disable':'Enable'}</button>
+        <button class="btn btn-secondary btn-sm" data-action="user-password" data-id="${u.id}">Password</button>
+        <button class="btn btn-danger btn-sm" data-action="user-delete" data-id="${u.id}" ${isMe?'disabled':''}>Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+};
+
+const loadSettings = async () => {
+  const data = await api('/settings');
+  $('#prompt').value = data.prompt || '';
+  for (const k of ['CTX_SIZE','THREADS','PARALLEL_SLOTS','N_GPU_LAYERS','LLAMA_TIMEOUT']) {
+    const el = $(`#${k}`);
+    if (el) el.value = data.llama?.[k] || '';
   }
-  select.value = service;
-  await loadLogs();
-}
+};
 
-async function loadTokens() {
-  const data = await api("/tokens");
-  const tokens = data.tokens || [];
-  if (!tokens.length) {
-    renderEmpty("#tokens-list", "No tokens yet.");
-    return;
-  }
-
-  $("#tokens-list").innerHTML = tokens.map((token) => `
-    <div class="list-row token-row">
-      <div>
-        <strong>${escapeHtml(token.name || "token")}</strong>
-        <code>${escapeHtml(token.key)}</code>
-      </div>
-      <span class="status ${token.enabled ? "good" : "bad"}">${token.enabled ? "enabled" : "disabled"}</span>
-      <span>${escapeHtml(token.used_tokens ?? 0)} used</span>
-      <span>${token.unlimited ? "unlimited" : `${escapeHtml(token.remaining_tokens ?? 0)} left`}</span>
-      <div class="row-actions">
-        <button class="secondary small" data-action="token-copy" data-key="${escapeHtml(token.key)}">Copy</button>
-        <button class="secondary small" data-action="token-toggle" data-key="${escapeHtml(token.key)}" data-enabled="${token.enabled}">
-          ${token.enabled ? "Disable" : "Enable"}
-        </button>
-        <button class="secondary small" data-action="token-reset" data-key="${escapeHtml(token.key)}">Reset</button>
-        <button class="danger small" data-action="token-delete" data-key="${escapeHtml(token.key)}">Delete</button>
-      </div>
-    </div>
-  `).join("");
-}
-
-async function createToken() {
-  const unlimited = $("#token-unlimited").checked;
-  const body = {
-    name: $("#token-name").value.trim() || "token",
-    unlimited,
-  };
-  if (!unlimited && $("#token-limit").value.trim()) {
-    body.limit_tokens = Number($("#token-limit").value.trim());
-  }
-  await api("/tokens", { method: "POST", body: JSON.stringify(body) });
-  $("#token-form").reset();
-  $("#token-unlimited").checked = true;
-  await loadTokens();
-}
-
-async function patchToken(key, body) {
-  await api(`/tokens/${encodeURIComponent(key)}`, { method: "PATCH", body: JSON.stringify(body) });
-  await loadTokens();
-}
-
-async function deleteToken(key) {
-  if (!window.confirm("Delete this token?")) return;
-  await api(`/tokens/${encodeURIComponent(key)}`, { method: "DELETE" });
-  await loadTokens();
-}
-
-async function copyText(value) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-  const input = document.createElement("textarea");
-  input.value = value;
-  input.setAttribute("readonly", "");
-  input.style.position = "fixed";
-  input.style.opacity = "0";
-  document.body.appendChild(input);
-  input.select();
-  document.execCommand("copy");
-  input.remove();
-}
-
-async function loadUsers() {
-  const data = await api("/users");
-  const users = data.users || [];
-  if (!users.length) {
-    renderEmpty("#users-list", "No users found.");
-    return;
-  }
-
-  $("#users-list").innerHTML = users.map((user) => {
-    const isMe = state.me && Number(state.me.id) === Number(user.id);
-    return `
-      <div class="list-row user-row">
-        <div>
-          <strong>${escapeHtml(user.username)}</strong>
-          <small>${isMe ? "current session" : `id ${escapeHtml(user.id)}`}</small>
-        </div>
-        <span class="status ${user.enabled ? "good" : "bad"}">${user.enabled ? "enabled" : "disabled"}</span>
-        <span>${user.is_admin ? "admin" : "user"}</span>
-        <div class="row-actions">
-          <button class="secondary small" data-action="user-toggle" data-id="${escapeHtml(user.id)}" data-enabled="${user.enabled}">
-            ${user.enabled ? "Disable" : "Enable"}
-          </button>
-          <button class="secondary small" data-action="user-password" data-id="${escapeHtml(user.id)}">Password</button>
-          <button class="danger small" data-action="user-delete" data-id="${escapeHtml(user.id)}" ${isMe ? "disabled" : ""}>Delete</button>
-        </div>
-      </div>
-    `;
-  }).join("");
-}
-
-async function createUser() {
-  await api("/users", {
-    method: "POST",
-    body: JSON.stringify({
-      username: $("#new-user").value.trim(),
-      password: $("#new-pass").value,
-      is_admin: true,
-    }),
-  });
-  $("#user-form").reset();
-  await loadUsers();
-}
-
-async function patchUser(id, body) {
-  await api(`/users/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) });
-  await loadUsers();
-}
-
-async function deleteUser(id) {
-  if (!window.confirm("Delete this user?")) return;
-  await api(`/users/${encodeURIComponent(id)}`, { method: "DELETE" });
-  await loadUsers();
-}
-
-async function loadSettings() {
-  const data = await api("/settings");
-  $("#prompt").value = data.prompt || "";
-  const llama = data.llama || {};
-  for (const key of ["CTX_SIZE", "THREADS", "PARALLEL_SLOTS", "N_GPU_LAYERS", "LLAMA_TIMEOUT"]) {
-    $(`#${key}`).value = llama[key] || "";
-  }
-}
-
-function settingsPayload() {
-  const body = { ANTI_CONFIRM_SYSTEM_PROMPT: $("#prompt").value };
-  for (const key of ["CTX_SIZE", "THREADS", "PARALLEL_SLOTS", "N_GPU_LAYERS", "LLAMA_TIMEOUT"]) {
-    body[key] = $(`#${key}`).value;
-  }
-  return body;
-}
-
-async function saveSettings(restart = false) {
-  const result = await api("/settings", { method: "POST", body: JSON.stringify(settingsPayload()) });
-  if (result.gateway_error) {
-    throw new Error(`Saved to .env, but token-gateway did not accept prompt update: ${result.gateway_error}`);
-  }
-  if (restart) await stackAction("restart");
-}
-
-async function loadModels() {
-  const data = await api("/models");
+const loadModels = async () => {
+  const data = await api('/models');
   const local = data.local || [];
   const catalog = data.catalog || [];
 
-  if (!local.length) {
-    renderEmpty("#models-local", "No .gguf files found in ./models.");
-  } else {
-    $("#models-local").innerHTML = local.map((model) => `
-      <div class="list-row model-row">
-        <div>
-          <strong>${escapeHtml(model.name)}</strong>
-          <code>${escapeHtml(model.path)}</code>
-        </div>
-        <span>${formatBytes(model.size)}</span>
-        <span class="status ${model.path === data.current ? "good" : ""}">${model.path === data.current ? "current" : "available"}</span>
-        <button class="secondary small" data-action="model-switch" data-path="${escapeHtml(model.path)}">Switch</button>
-      </div>
-    `).join("");
+  const activeBox = $('#tab-models .form-card:first-child');
+  if (activeBox) {
+    activeBox.querySelector('div[style*="display:flex"] strong')?.textContent = data.current?.split('/').pop() || 'not set';
+    activeBox.querySelector('code')?.textContent = data.current || '-';
   }
 
-  if (!catalog.length) {
-    renderEmpty("#models-catalog", "Catalog is empty.");
-  } else {
-    $("#models-catalog").innerHTML = catalog.map((item) => `
-      <div class="catalog-card">
-        <strong>${escapeHtml(item.title || item.repo)}</strong>
-        <p>${escapeHtml(item.description || item.recommended || "")}</p>
-        <code>${escapeHtml(item.repo)} / ${escapeHtml(item.include)}</code>
-        <button class="secondary small"
-          data-action="catalog-download"
-          data-repo="${escapeHtml(item.repo)}"
-          data-include="${escapeHtml(item.include)}"
-          data-dir="${escapeHtml(item.local_dir || "")}">
-          Download
-        </button>
-      </div>
-    `).join("");
+  const lTbody = $('#models-local');
+  if (lTbody) {
+    lTbody.innerHTML = local.length ? local.map(m => `<tr>
+      <td><strong>${escapeHtml(m.name)}</strong></td>
+      <td><code>${escapeHtml(m.path)}</code></td>
+      <td>${formatBytes(m.size)}</td>
+      <td><span class="badge ${m.path===data.current?'running':'disabled'}">${m.path===data.current?'current':'available'}</span></td>
+      <td>${m.path===data.current ? '<button class="btn btn-secondary btn-sm" disabled>Active</button>' : `<button class="btn btn-primary btn-sm" data-action="model-switch" data-path="${escapeHtml(m.path)}">Switch</button>`}</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="empty-state">No .gguf files in ./models</td></tr>';
   }
 
-  await loadModelJobs(false);
-}
+  const cBox = $('#models-catalog');
+  if (cBox) {
+    cBox.innerHTML = catalog.length ? catalog.map(c => `<div class="catalog-card">
+      <strong>${escapeHtml(c.title||c.repo)}</strong>
+      <p>${escapeHtml(c.description||c.recommended||'')}</p>
+      <code>${escapeHtml(c.repo)} / ${escapeHtml(c.include)}</code>
+      <button class="btn btn-secondary btn-sm" data-action="catalog-download" data-repo="${escapeHtml(c.repo)}" data-include="${escapeHtml(c.include)}" data-dir="${escapeHtml(c.local_dir||'')}">Download</button>
+    </div>`).join('') : '<div class="empty-state">Catalog is empty</div>';
+  }
+};
 
-async function switchModel(path) {
-  await api("/models/switch", { method: "POST", body: JSON.stringify({ path, restart: true }) });
-  await loadModels();
-}
-
-async function downloadModel(repo, include, localDir) {
-  const result = await api("/models/download", {
-    method: "POST",
-    body: JSON.stringify({ repo, include: include || "*.gguf", local_dir: localDir || "" }),
-  });
-  toast(`Download queued: ${result.job_id}`, "good");
-  await loadModelJobs(true);
-}
-
-async function uploadModel() {
-  const file = $("#gguf-file").files[0];
-  if (!file) throw new Error("Choose a .gguf file first.");
-  const form = new FormData();
-  form.append("file", file);
-  await api("/models/upload", { method: "POST", body: form });
-  $("#gguf-file").value = "";
-  await loadModels();
-}
-
-async function loadModelJobs(show = true) {
-  const data = await api("/models/jobs");
-  const box = $("#jobs-output");
-  box.textContent = JSON.stringify(data.jobs || {}, null, 2);
-  box.classList.toggle("hidden", !show && Object.keys(data.jobs || {}).length === 0);
-}
-
-async function loadClients() {
-  const [data, settings] = await Promise.all([
-    api("/clients"),
-    api("/settings").catch(() => ({})),
-  ]);
-  const baseUrl = String(settings.public_base_url || window.location.origin).replace(/\/$/, "");
+const loadClients = async () => {
+  const [data, settings] = await Promise.all([api('/clients'), api('/settings').catch(()=>({}))]);
+  const baseUrl = String(settings.public_base_url || window.location.origin).replace(/\/$/,'');
   state.clientsBaseUrl = `${baseUrl}/v1`;
-  const modelName = settings.model_path ? settings.model_path.split("/").pop() : "active GGUF model";
+  const model = settings.model_path ? settings.model_path.split('/').pop() : 'active GGUF';
+
   const meta = {
-    opencode: {
-      title: "OpenCode Desktop",
-      icon: "bi-code-slash",
-      tone: "recommended",
-      provider: "OpenAI Compatible",
-      startCommand: "docker compose --profile tools up -d opencode-server",
-      stopCommand: "docker compose stop opencode-server",
-      steps: [
-        ["Provider", "OpenAI Compatible"],
-        ["Base URL", state.clientsBaseUrl],
-        ["API key", "Token from Tokens tab"],
-        ["Model", modelName],
-      ],
-    },
-    codex: {
-      title: "Codex Runner",
-      icon: "bi-terminal",
-      tone: "tools",
-      provider: "OpenAI SDK",
-      startCommand: "docker compose --profile tools up -d codex-runner",
-      stopCommand: "docker compose stop codex-runner",
-      steps: [
-        ["OPENAI_BASE_URL", state.clientsBaseUrl],
-        ["OPENAI_API_KEY", "Token from Tokens tab"],
-        ["Model", modelName],
-      ],
-    },
-    claude: {
-      title: "Claude Code Proxy",
-      icon: "bi-bezier2",
-      tone: "experimental",
-      provider: "Proxy",
-      startCommand: "docker compose --profile claude up -d claude-code-proxy",
-      stopCommand: "docker compose stop claude-code-proxy",
-      steps: [
-        ["Status", "Experimental local proxy"],
-        ["Base URL", state.clientsBaseUrl],
-        ["API key", "Token from Tokens tab"],
-      ],
-    },
-    openrouter: {
-      title: "OpenRouter",
-      icon: "bi-cloud-arrow-up",
-      tone: "external",
-      provider: "External",
-      startCommand: "No local container is required.",
-      stopCommand: "Managed outside this stack.",
-      steps: [
-        ["Base URL", "https://openrouter.ai/api/v1"],
-        ["API key", "OpenRouter key"],
-        ["Use case", "External fallback provider"],
-      ],
-    },
+    opencode: { title:'OpenCode Desktop', icon:'🖥️', tone:'recommended', steps:[['Provider','OpenAI Compatible'],['Base URL',state.clientsBaseUrl],['API Key','Token from Tokens tab'],['Model',model]] },
+    codex: { title:'Codex Runner', icon:'💻', tone:'tools', steps:[['OPENAI_BASE_URL',state.clientsBaseUrl],['OPENAI_API_KEY','Token from Tokens tab'],['Model',model]] },
+    claude: { title:'Claude Code Proxy', icon:'🧩', tone:'experimental', steps:[['Status','Experimental'],['Base URL',state.clientsBaseUrl],['API Key','Token from Tokens tab']] },
+    openrouter: { title:'OpenRouter', icon:'🌐', tone:'external', steps:[['Base URL','https://openrouter.ai/api/v1'],['API Key','OpenRouter key'],['Use Case','External fallback']] }
   };
 
   const entries = Object.entries(data);
-  if (!entries.length) {
-    renderEmpty("#clients-list", "No clients are configured.");
-    setHtml("#clients-summary", "");
-    return;
-  }
+  if (!entries.length) return renderEmpty('#clients-list', 'No clients configured.');
 
-  const localEntries = entries.filter(([, client]) => !client.external);
-  const runningCount = localEntries.filter(([, client]) => client.enabled).length;
-  const definedCount = localEntries.filter(([, client]) => client.defined).length;
-  const externalCount = entries.filter(([, client]) => client.external).length;
-  setHtml("#clients-summary", `
-    <div class="client-summary-card">
-      <span class="client-summary-label">Running</span>
-      <strong>${runningCount}/${localEntries.length}</strong>
-    </div>
-    <div class="client-summary-card">
-      <span class="client-summary-label">Compose Ready</span>
-      <strong>${definedCount}/${localEntries.length}</strong>
-    </div>
-    <div class="client-summary-card">
-      <span class="client-summary-label">External</span>
-      <strong>${externalCount}</strong>
-    </div>
-    <div class="client-summary-card client-summary-wide">
-      <span class="client-summary-label">Base URL</span>
-      <code>${escapeHtml(state.clientsBaseUrl)}</code>
-    </div>
-  `);
+  setHtml('#clients-list', entries.map(([name, c]) => {
+    const info = meta[name] || { title:name, icon:'📦', tone:'tools', steps:[['Base URL',state.clientsBaseUrl]] };
+    const ext = Boolean(c.external);
+    const cls = ext || c.enabled ? 'running' : 'stopped';
+    const statusLabel = ext ? 'external' : (c.enabled ? 'running' : 'off');
+    const actionBtn = ext ? '<span style="font-size:12px;color:var(--accent-blue)">External service</span>' :
+      c.enabled ? `<button class="btn btn-danger btn-sm" data-action="client-disable" data-client="${name}">Disable</button>
+                   <button class="btn btn-secondary btn-sm" data-action="client-logs" data-service="${c.service||''}">Logs</button>` :
+      `<button class="btn btn-success btn-sm" data-action="client-enable" data-client="${name}">Enable</button>`;
 
-  setHtml("#clients-list", entries.map(([name, client]) => {
-    const info = meta[name] || {
-      title: name,
-      icon: "bi-box",
-      tone: "tools",
-      provider: "OpenAI Compatible",
-      startCommand: "",
-      stopCommand: "",
-      steps: [["Base URL", state.clientsBaseUrl]],
-    };
-    const external = Boolean(client.external);
-    const rawStatus = String(client.status || "").trim();
-    const statusClass = external || client.enabled ? "good" : (rawStatus === "exited" || rawStatus === "created" ? "warn" : "bad");
-    const statusLabel = external ? "external" : (client.enabled ? "running" : (rawStatus && rawStatus !== "unknown" ? rawStatus : "off"));
-    const composeLabel = external ? "external service" : (client.defined ? "compose ready" : "compose missing");
-    const service = client.service || "";
-    const cardState = external ? "external" : (client.enabled ? "running" : "stopped");
-    const primaryAction = external
-      ? `<span class="status good">Managed externally</span>`
-      : client.enabled
-        ? `<button class="btn btn-danger btn-small" data-action="client-disable" data-client="${escapeHtml(name)}">
-          <i class="bi bi-stop-fill" aria-hidden="true"></i>
-          Disable
-        </button>`
-        : `<button class="btn btn-primary btn-small" data-action="client-enable" data-client="${escapeHtml(name)}">
-          <i class="bi bi-play-fill" aria-hidden="true"></i>
-          ${client.defined ? "Enable" : "Install & Enable"}
-        </button>`;
-    const logsAction = service
-      ? `<button class="btn btn-secondary btn-small" data-action="client-logs" data-service="${escapeHtml(service)}" ${client.enabled ? "" : "disabled"}>
-          <i class="bi bi-journal-text" aria-hidden="true"></i>
-          Logs
-        </button>`
-      : "";
-    const command = client.enabled ? info.stopCommand : info.startCommand;
-    return `
-      <article class="client-card client-${escapeHtml(info.tone)} is-${cardState}">
-        <div class="client-card-header">
-          <div class="client-icon"><i class="bi ${escapeHtml(info.icon)}" aria-hidden="true"></i></div>
-          <div>
-            <h3>${escapeHtml(info.title)}</h3>
-            <p>${escapeHtml(client.hint || "")}</p>
-          </div>
-          <span class="client-power ${client.enabled || external ? "on" : "off"}" aria-hidden="true"></span>
-        </div>
-        <div class="client-status-line">
-          <span class="status ${statusClass}">${statusLabel}</span>
-          <span class="status neutral">${composeLabel}</span>
-          ${service ? `<span class="status neutral">${escapeHtml(service)}</span>` : ""}
-        </div>
-        <dl class="client-settings">
-          ${info.steps.map(([label, value]) => `
-            <div>
-              <dt>${escapeHtml(label)}</dt>
-              <dd>${escapeHtml(value)}</dd>
-            </div>
-          `).join("")}
-        </dl>
-        <div class="client-command-block">
-          <span>${client.enabled ? "Stop command" : "Start command"}</span>
-          <pre class="client-command">${escapeHtml(command)}</pre>
-        </div>
-        <div class="client-actions">
-          ${primaryAction}
-          ${logsAction}
-        </div>
-      </article>
-    `;
-  }).join(""));
-}
+    return `<div class="client-card ${cls}">
+      <h5><span class="status-indicator"></span>${escapeHtml(info.title)}</h5>
+      <p>${escapeHtml(c.hint||'')}</p>
+      <div class="client-settings-list">${info.steps.map(([l,v])=>`<div class="client-setting"><span class="label">${escapeHtml(l)}</span><span class="value">${escapeHtml(v)}</span></div>`).join('')}</div>
+      <div class="actions">${actionBtn}</div>
+    </div>`;
+  }).join(''));
+};
 
-async function setClientEnabled(client, enabled) {
-  const action = enabled ? "enable" : "disable";
-  const result = await api(`/clients/${encodeURIComponent(client)}/${action}`, { method: "POST" });
-  showCommandOutput(`${action} ${client}`, result.result || result, "#clients-output");
-  if (result.ok === false || (result.result && result.result.returncode !== 0)) {
-    throw new Error((result.result?.stderr || result.result?.stdout || result.enable?.stderr || "Client command failed").trim());
-  }
-  await loadClients();
-}
-
-function toggleUserInfo(button) {
-  const panel = $("#sidebar-user-info");
-  const icon = button?.querySelector(".toggle-icon");
-  if (!panel) return;
-  const collapsed = panel.classList.toggle("is-collapsed");
-  panel.classList.toggle("is-open", !collapsed);
-  button?.setAttribute("aria-expanded", String(!collapsed));
-  if (icon) {
-    icon.classList.toggle("bi-chevron-up", !collapsed);
-    icon.classList.toggle("bi-chevron-down", collapsed);
-  }
-}
-
-function toggleSidebar() {
-  $("#sidebar")?.classList.toggle("open");
-}
-
-function syncGlobalSearch() {
-  const query = $("#global-search")?.value.trim().toLowerCase() || "";
-  const panel = $(`#tab-${state.tab}`);
-  if (!panel) return;
-  const items = panel.querySelectorAll(".list-row, .client-card, .catalog-card, .client-summary-card");
-  items.forEach((item) => {
-    const matched = !query || item.textContent.toLowerCase().includes(query);
-    item.classList.toggle("is-search-hidden", !matched);
-  });
-}
-
-function stopLogsFollow() {
-  if (state.logsFollowTimer) {
-    window.clearInterval(state.logsFollowTimer);
-    state.logsFollowTimer = null;
-  }
-}
-
-function applyLogFilter(text) {
-  const query = $("#log-filter")?.value.trim().toLowerCase() || "";
-  if (!query) return text;
-  return text
-    .split("\n")
-    .filter((line) => line.toLowerCase().includes(query))
-    .join("\n");
-}
-
-function syncLogsFollow() {
+// Logs
+const stopLogsFollow = () => { if (state.logsTimer) clearInterval(state.logsTimer); state.logsTimer = null; };
+const syncLogsFollow = () => {
   stopLogsFollow();
-  if ($("#logs-follow")?.checked && state.tab === "logs") {
-    state.logsFollowTimer = window.setInterval(() => loadLogs({ silent: true }).catch(() => {}), 3500);
-  }
-}
-
-async function loadLogs(options = {}) {
-  const service = $("#log-service").value;
+  if ($('#logs-follow')?.checked && state.tab === 'logs') state.logsTimer = setInterval(() => loadLogs({ silent:true }).catch(()=>{}), 4000);
+};
+const applyLogFilter = (text) => {
+  const q = $('#log-filter')?.value.trim().toLowerCase() || '';
+  return q ? text.split('\n').filter(l => l.toLowerCase().includes(q)).join('\n') : text;
+};
+const loadLogs = async ({ silent=false } = {}) => {
+  const service = $('#log-service')?.value || 'llama-server-coder';
   const data = await api(`/logs/${encodeURIComponent(service)}?tail=300`);
-  state.lastLogsText = (data.stdout || "") + (data.stderr || "") || "No logs.";
-  setText("#logs-output", applyLogFilter(state.lastLogsText));
-  if (!options.silent) syncLogsFollow();
-}
+  state.lastLogsText = (data.stdout||'') + (data.stderr||'') || 'No logs available.';
+  setText('#logs-output', applyLogFilter(state.lastLogsText));
+  if (!silent) syncLogsFollow();
+};
 
-function setUpdateState(kind, label) {
-  const badge = $("#update-state");
-  if (!badge) return;
-  badge.className = `badge badge-${badgeKinds[kind] || kind || "info"}`;
-  badge.textContent = label;
-}
-
-function renderUpdate(data) {
-  $("#update-current").textContent = data.current_short || "-";
-  $("#update-current-msg").textContent = data.current_message || "-";
-  $("#update-latest").textContent = data.latest_short || "-";
-  $("#update-latest-msg").textContent = data.latest_message || "-";
-  $("#update-branch").textContent = data.branch || "-";
-  $("#update-remote").textContent = data.remote || "-";
-  $("#update-dot").classList.toggle("hidden", !data.has_update);
-
-  const apply = $("#update-apply");
-  apply.disabled = true;
-
-  if (!data.configured) {
-    setUpdateState("bad", "Git not configured");
-    $("#update-title").textContent = "Updates are not available";
-    $("#update-copy").textContent = data.error || "This folder is not a git repository.";
-    return;
-  }
-  if (data.fetch_error) {
-    setUpdateState("bad", "Check failed");
-    $("#update-title").textContent = "Could not check GitHub";
-    $("#update-copy").textContent = data.fetch_error;
-    return;
-  }
-  if (data.ahead > 0) {
-    setUpdateState("warn", "Local branch ahead");
-    $("#update-title").textContent = "Manual check required";
-    $("#update-copy").textContent = "Local commits are not on origin; fast-forward update is not safe.";
-    return;
-  }
-  if (data.has_update) {
-    setUpdateState("warn", "Update available");
-    $("#update-title").textContent = `New version: ${data.behind} commit(s)`;
-    $("#update-copy").textContent = data.dirty
-      ? "Local changes will be saved to git stash automatically, then the stack will update and restart."
-      : "Download the latest code from GitHub and rebuild the stack.";
-    apply.disabled = !data.can_update;
-    return;
-  }
-  setUpdateState("good", "Up to date");
-  $("#update-title").textContent = "Installed version matches GitHub";
-  $("#update-copy").textContent = data.dirty
-    ? "No update is available. Local changes will be auto-stashed next time an update is applied."
-    : "No update is available.";
-}
-
-async function loadUpdate(fetch = true) {
-  const data = await api(`/update/status?fetch=${fetch ? "true" : "false"}`);
+// Updates
+const renderUpdate = (data) => {
+  setText('#update-current', data.current_short || '-');
+  setText('#update-latest', data.latest_short || '-');
+  setText('#update-branch', data.branch || '-');
+  $('#update-dot')?.classList.toggle('hidden', !data.has_update);
+  const apply = $('#update-apply');
+  if (apply) apply.disabled = true;
+  const badge = $('#update-state');
+  if (!data.configured) { if(badge) badge.className='badge badge-danger'; setText('#update-title','Updates not available'); setText('#update-copy', data.error||'Not a git repo'); return; }
+  if (data.fetch_error) { if(badge) badge.className='badge badge-warning'; setText('#update-title','Check failed'); setText('#update-copy', data.fetch_error); return; }
+  if (data.ahead > 0) { if(badge) badge.className='badge badge-warning'; setText('#update-title','Local ahead'); setText('#update-copy','Local commits block fast-forward'); return; }
+  if (data.has_update) { if(badge) badge.className='badge badge-warning'; setText('#update-title',`New: ${data.behind} commit(s)`); setText('#update-copy', data.dirty?'Local changes will be stashed':'Download & rebuild'); if(apply) apply.disabled=!data.can_update; return; }
+  if(badge) badge.className='badge badge-success'; setText('#update-title','Up to date'); setText('#update-copy', data.dirty?'Local changes present. Auto-stashed on update.':'No updates available.');
+};
+const loadUpdate = async (fetch=true) => {
+  const data = await api(`/update/status?fetch=${fetch?'true':'false'}`);
   renderUpdate(data);
-}
-
-function renderUpdateJob(job) {
-  const box = $("#update-progress");
-  box.classList.remove("hidden");
-  box.textContent = JSON.stringify(job, null, 2);
-
-  if (job.status === "done") {
-    setUpdateState("good", "Done");
-    $("#update-title").textContent = "Update completed";
-    $("#update-copy").textContent = job.message || "Stack was updated and restarted.";
-  } else if (job.status === "error") {
-    setUpdateState("bad", "Failed");
-    $("#update-title").textContent = "Update failed";
-    $("#update-copy").textContent = job.error || "Check the update output.";
-  } else if (job.status === "restarting" || job.step === "restarting-admin-ui") {
-    setUpdateState("warn", "Restarting");
-    $("#update-title").textContent = "Admin UI is restarting";
-    $("#update-copy").textContent = job.message || "The page can disconnect briefly; it will reconnect when the panel is back.";
-  } else {
-    setUpdateState("warn", "Updating");
-    $("#update-title").textContent = "Downloading and restarting";
-    $("#update-copy").textContent = `Current step: ${job.step || "queued"}`;
-  }
-}
-
-async function pollUpdateJob() {
+};
+const renderUpdateJob = (job) => {
+  const box = $('#update-progress'); if(!box) return;
+  box.classList.remove('hidden'); box.textContent = JSON.stringify(job, null, 2);
+  const badge = $('#update-state');
+  if(job.status==='done') { if(badge) badge.className='badge badge-success'; setText('#update-title','Done'); setText('#update-copy','Stack updated & restarted'); }
+  else if(job.status==='error') { if(badge) badge.className='badge badge-danger'; setText('#update-title','Failed'); setText('#update-copy',job.error||'Check output'); }
+  else if(job.status==='restarting') { if(badge) badge.className='badge badge-warning'; setText('#update-title','Restarting'); setText('#update-copy','UI will reconnect shortly'); }
+  else { if(badge) badge.className='badge badge-warning'; setText('#update-title','Updating'); setText('#update-copy',`Step: ${job.step||'queued'}`); }
+};
+const pollUpdateJob = async () => {
   if (!state.updateJobId) return;
   const job = await api(`/update/jobs/${state.updateJobId}`);
   renderUpdateJob(job);
-  if (["done", "error"].includes(job.status)) {
-    window.clearInterval(state.updatePollTimer);
-    state.updatePollTimer = null;
-    state.updateJobId = null;
-    window.localStorage?.removeItem("localAiUpdateJobId");
-    await loadUpdate(false).catch(() => {});
+  if (['done','error'].includes(job.status)) {
+    clearInterval(state.updateTimer); state.updateTimer=null;
+    localStorage.removeItem('localAiUpdateJobId'); state.updateJobId=null;
+    await loadUpdate(false).catch(()=>{});
   }
-}
+};
 
-async function applyUpdate() {
-  $("#update-progress").classList.remove("hidden");
-  $("#update-progress").textContent = "Queued...";
-  const result = await api("/update/apply", { method: "POST", body: "{}" });
-  state.updateJobId = result.job_id;
-  window.localStorage?.setItem("localAiUpdateJobId", state.updateJobId);
-  if (state.updatePollTimer) window.clearInterval(state.updatePollTimer);
-  state.updatePollTimer = window.setInterval(() => pollUpdateJob().catch(() => {}), 2500);
-  await pollUpdateJob();
-}
+// ==========================================
+// 5. ACTIONS & CRUD
+// ==========================================
+const runAction = async (btn, task, successMsg) => {
+  const orig = btn?.innerHTML;
+  if (btn) { btn.disabled=true; btn.dataset.busy='1'; btn.innerHTML='<span class="spinner"></span> Working...'; }
+  try {
+    const res = await task();
+    if (successMsg) toast(successMsg, 'success');
+    return res;
+  } catch (e) { toast(e.message, 'error'); throw e; }
+  finally {
+    if (btn) { btn.disabled=false; delete btn.dataset.busy; btn.innerHTML=orig||''; }
+  }
+};
 
-function handleAction(button) {
-  const action = button.dataset.action;
-  const stackMap = {
-    "stack-start": "start",
-    "stack-stop": "stop",
-    "stack-restart": "restart",
-    "stack-down": "down",
-    "stack-status": "status",
-  };
+const createToken = async () => {
+  const unlimited = $('#token-unlimited')?.checked;
+  const body = { name:$('#token-name')?.value?.trim()||'token', unlimited };
+  if (!unlimited && $('#token-limit')?.value) body.limit_tokens = Number($('#token-limit').value);
+  await api('/tokens', { method:'POST', body:JSON.stringify(body) });
+  $('#token-form')?.reset(); if($('#token-unlimited')) $('#token-unlimited').checked=true;
+  await loadTokens();
+};
+const toggleToken = async (key, enabled) => { await api(`/tokens/${encodeURIComponent(key)}`, { method:'PATCH', body:JSON.stringify({ enabled }) }); await loadTokens(); };
+const resetToken = async (key) => { await api(`/tokens/${encodeURIComponent(key)}`, { method:'PATCH', body:JSON.stringify({ reset_usage:true }) }); await loadTokens(); };
+const deleteToken = async (key) => { if (!confirm('Delete this token?')) return; await api(`/tokens/${encodeURIComponent(key)}`, { method:'DELETE' }); await loadTokens(); };
 
-  if (action === "toggle-sidebar") {
-    toggleSidebar();
-    return undefined;
-  }
-  if (action === "toggle-user-info") {
-    toggleUserInfo(button);
-    return undefined;
-  }
-  if (action === "refresh") return runAction(button, loadCurrentTab, "Refreshed");
-  if (action === "logout") return runAction(button, logout);
-  if (action === "load-system") return runAction(button, loadSystem, "Containers reloaded");
-  if (action === "load-tokens") return runAction(button, loadTokens, "Tokens reloaded");
-  if (action === "load-users") return runAction(button, loadUsers, "Users reloaded");
-  if (action === "load-models") return runAction(button, loadModels, "Models reloaded");
-  if (action === "load-clients") return runAction(button, loadClients, "Clients reloaded");
-  if (action === "load-update") return runAction(button, () => loadUpdate(true), "Update status refreshed");
-  if (action === "apply-update") return runAction(button, applyUpdate);
-  if (action === "upload-model") return runAction(button, uploadModel, "Model uploaded");
-  if (stackMap[action]) return runAction(button, () => stackAction(stackMap[action]), `Stack ${stackMap[action]} finished`);
-  if (action === "container-logs") return runAction(button, () => openContainerLogs(button.dataset.service));
-  if (action === "container-start") return runAction(button, () => containerAction(button.dataset.container, "start"), "Container started");
-  if (action === "container-stop") return runAction(button, () => containerAction(button.dataset.container, "stop"), "Container stopped");
-  if (action === "container-restart") return runAction(button, () => containerAction(button.dataset.container, "restart"), "Container restarted");
+const createUser = async () => {
+  await api('/users', { method:'POST', body:JSON.stringify({ username:$('#new-user')?.value?.trim(), password:$('#new-pass')?.value, is_admin:true }) });
+  $('#user-form')?.reset(); await loadUsers();
+};
+const toggleUser = async (id, enabled) => { await api(`/users/${id}`, { method:'PATCH', body:JSON.stringify({ enabled }) }); await loadUsers(); };
+const changePassword = async (id) => { const p = prompt('New password:'); if (!p) return; await api(`/users/${id}`, { method:'PATCH', body:JSON.stringify({ password:p }) }); toast('Password updated','success'); };
+const deleteUser = async (id) => { if (!confirm('Delete user?')) return; await api(`/users/${id}`, { method:'DELETE' }); await loadUsers(); };
 
-  if (action === "token-copy") {
-    return runAction(button, () => copyText(button.dataset.key), "Token copied");
-  }
-  if (action === "token-toggle") {
-    return runAction(button, () => patchToken(button.dataset.key, { enabled: button.dataset.enabled !== "true" }), "Token updated");
-  }
-  if (action === "token-reset") {
-    return runAction(button, () => patchToken(button.dataset.key, { reset_usage: true }), "Token usage reset");
-  }
-  if (action === "token-delete") {
-    return runAction(button, () => deleteToken(button.dataset.key), "Token deleted");
-  }
-  if (action === "user-toggle") {
-    return runAction(button, () => patchUser(button.dataset.id, { enabled: button.dataset.enabled !== "true" }), "User updated");
-  }
-  if (action === "user-password") {
-    const password = window.prompt("New password");
-    if (!password) return undefined;
-    return runAction(button, () => patchUser(button.dataset.id, { password }), "Password changed");
-  }
-  if (action === "user-delete") {
-    return runAction(button, () => deleteUser(button.dataset.id), "User deleted");
-  }
-  if (action === "model-switch") {
-    return runAction(button, () => switchModel(button.dataset.path), "Model switched");
-  }
-  if (action === "catalog-download") {
-    return runAction(
-      button,
-      () => downloadModel(button.dataset.repo, button.dataset.include, button.dataset.dir),
-      "Download started",
-    );
-  }
-  if (action === "client-copy-base") {
-    return runAction(button, () => copyText(state.clientsBaseUrl || `${window.location.origin}/v1`), "Base URL copied");
-  }
-  if (action === "client-enable") {
-    return runAction(button, () => setClientEnabled(button.dataset.client, true), "Client enabled");
-  }
-  if (action === "client-disable") {
-    return runAction(button, () => setClientEnabled(button.dataset.client, false), "Client disabled");
-  }
-  if (action === "client-logs") {
-    return runAction(button, () => openContainerLogs(button.dataset.service));
-  }
-  if (action === "save-settings-restart") {
-    return runAction(button, () => saveSettings(true), "Settings saved");
-  }
-  return undefined;
-}
+const switchModel = async (path) => { await api('/models/switch', { method:'POST', body:JSON.stringify({ path, restart:true }) }); await loadModels(); };
+const downloadModel = async (repo, inc, dir) => { const r = await api('/models/download', { method:'POST', body:JSON.stringify({ repo, include:inc||'*.gguf', local_dir:dir||'' }) }); toast(`Download queued: ${r.job_id}`,'success'); await loadModels(); };
+const uploadModel = async () => {
+  const f = $('#gguf-file')?.files?.[0]; if (!f) throw new Error('Select .gguf');
+  const fd = new FormData(); fd.append('file', f);
+  await api('/models/upload', { method:'POST', body:fd });
+  $('#gguf-file').value=''; await loadModels();
+};
 
-document.addEventListener("click", (event) => {
-  const nav = event.target.closest("[data-tab]");
-  if (nav) {
-    event.preventDefault();
-    setActiveTab(nav.dataset.tab);
-    return;
-  }
+const saveSettings = async (restart=false) => {
+  const body = { ANTI_CONFIRM_SYSTEM_PROMPT: $('#prompt')?.value || '' };
+  for (const k of ['CTX_SIZE','THREADS','PARALLEL_SLOTS','N_GPU_LAYERS','LLAMA_TIMEOUT']) body[k] = $(`#${k}`)?.value || '';
+  const res = await api('/settings', { method:'POST', body:JSON.stringify({ ...body, restart }) });
+  if (res.gateway_error) throw new Error(`Saved, but gateway rejected: ${res.gateway_error}`);
+  if (restart) await stackAction('restart');
+};
 
-  const button = event.target.closest("[data-action]");
-  if (!button) return;
-  event.preventDefault();
-  handleAction(button)?.catch(() => {});
-});
+const toggleClient = async (name, enabled) => {
+  await api(`/clients/${encodeURIComponent(name)}/${enabled?'enable':'disable'}`, { method:'POST' });
+  await loadClients();
+};
 
-bind("#login-form", "submit", (event) => {
-  event.preventDefault();
-  runAction($("#login-form button[type='submit']"), login).catch((error) => {
-    const loginError = setText("#login-error", errorText(error));
-    loginError?.classList.remove("hidden");
+const stackAction = async (action) => { await api(`/stack/${encodeURIComponent(action)}`, { method:'POST' }); toast(`Stack ${action} finished`, 'success'); setTimeout(loadSystem, 1200); };
+const containerAction = async (name, action) => { await api(`/containers/${encodeURIComponent(name)}/${encodeURIComponent(action)}`, { method:'POST' }); toast(`Container ${action}ed`, 'success'); setTimeout(loadSystem, 800); };
+const openContainerLogs = (service) => {
+  setActiveTab('logs');
+  const sel = $('#log-service'); if (sel && ![...sel.options].some(o=>o.value===service)) { const o=document.createElement('option'); o.value=service; o.textContent=service; sel.appendChild(o); }
+  if (sel) sel.value = service; loadLogs();
+};
+const copyText = async (val) => { if (navigator.clipboard) await navigator.clipboard.writeText(val); toast('Copied to clipboard', 'success'); };
+
+// Auth
+const login = async () => {
+  $('#login-error')?.classList.add('hidden');
+  await api('/login', { method:'POST', body:JSON.stringify({ username:$('#login-user').value.trim(), password:$('#login-pass').value }) });
+  await boot();
+};
+const logout = async () => { await api('/logout', { method:'POST' }); state.user=null; $('#login-view')?.classList.remove('hidden'); $('#app-view')?.classList.add('hidden'); };
+
+// ==========================================
+// 6. EVENT BINDING & INIT
+// ==========================================
+const handleAction = (btn) => {
+  const a = btn.dataset.action;
+  const map = { 'stack-start':'start','stack-stop':'stop','stack-restart':'restart','stack-down':'down','stack-status':'status' };
+  if (a==='refresh') return runAction(btn, loadCurrentTab, 'Refreshed');
+  if (a==='logout') return runAction(btn, logout);
+  if (map[a]) return runAction(btn, ()=>stackAction(map[a]), `Stack ${map[a]}`);
+  if (a==='container-logs') return openContainerLogs(btn.dataset.service);
+  if (a==='container-start') return runAction(btn, ()=>containerAction(btn.dataset.container,'start'), 'Started');
+  if (a==='container-stop') return runAction(btn, ()=>containerAction(btn.dataset.container,'stop'), 'Stopped');
+  if (a==='container-restart') return runAction(btn, ()=>containerAction(btn.dataset.container,'restart'), 'Restarted');
+  if (a==='token-copy') return runAction(btn, ()=>copyText(btn.dataset.key), 'Copied');
+  if (a==='token-toggle') return runAction(btn, ()=>toggleToken(btn.dataset.key, btn.dataset.enabled!=='true'), 'Updated');
+  if (a==='token-reset') return runAction(btn, ()=>resetToken(btn.dataset.key), 'Reset');
+  if (a==='token-delete') return runAction(btn, ()=>deleteToken(btn.dataset.key), 'Deleted');
+  if (a==='user-toggle') return runAction(btn, ()=>toggleUser(btn.dataset.id, btn.dataset.enabled!=='true'), 'Updated');
+  if (a==='user-password') return runAction(btn, ()=>changePassword(btn.dataset.id), 'Changed');
+  if (a==='user-delete') return runAction(btn, ()=>deleteUser(btn.dataset.id), 'Deleted');
+  if (a==='model-switch') return runAction(btn, ()=>switchModel(btn.dataset.path), 'Switched');
+  if (a==='catalog-download') return runAction(btn, ()=>downloadModel(btn.dataset.repo, btn.dataset.include, btn.dataset.dir), 'Started');
+  if (a==='client-enable') return runAction(btn, ()=>toggleClient(btn.dataset.client, true), 'Enabled');
+  if (a==='client-disable') return runAction(btn, ()=>toggleClient(btn.dataset.client, false), 'Disabled');
+  if (a==='client-logs') return openContainerLogs(btn.dataset.service);
+  if (a==='save-settings-restart') return runAction(btn, ()=>saveSettings(true), 'Saved');
+  if (a==='apply-update') return runAction(btn, async () => { const r=await api('/update/apply',{method:'POST',body:'{}'}); state.updateJobId=r.job_id; localStorage.setItem('localAiUpdateJobId',r.job_id); if(state.updateTimer) clearInterval(state.updateTimer); state.updateTimer=setInterval(pollUpdateJob, 2500); await pollUpdateJob(); }, 'Queued');
+};
+
+const syncGlobalSearch = () => {
+  const q = $('#global-search')?.value.trim().toLowerCase() || '';
+  $$('.tab-content.active .list-row, .tab-content.active .client-card, .tab-content.active .catalog-card').forEach(el => el.classList.toggle('is-search-hidden', q && !el.textContent.toLowerCase().includes(q)));
+};
+
+// DOM Ready
+document.addEventListener('DOMContentLoaded', () => {
+  // Navigation
+  $$('.nav-item').forEach(el => el.addEventListener('click', () => setActiveTab(el.dataset.tab)));
+
+  // Action delegation
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (btn) { e.preventDefault(); handleAction(btn)?.catch(()=>{}); }
   });
+
+  // Forms
+  $('#login-form')?.addEventListener('submit', e => { e.preventDefault(); runAction(e.target.querySelector('button[type=submit]'), login).catch(err => { const el=$('#login-error'); if(el){el.textContent=err.message; el.classList.remove('hidden'); }}); });
+  $('#token-form')?.addEventListener('submit', e => { e.preventDefault(); runAction(e.target.querySelector('button[type=submit]'), createToken, 'Token created').catch(()=>{}); });
+  $('#user-form')?.addEventListener('submit', e => { e.preventDefault(); runAction(e.target.querySelector('button[type=submit]'), createUser, 'User created').catch(()=>{}); });
+  $('#hf-form')?.addEventListener('submit', e => { e.preventDefault(); runAction(e.target.querySelector('button[type=submit]'), ()=>downloadModel($('#hf-repo').value.trim(), $('#hf-include').value.trim()||'*.gguf', $('#hf-dir').value.trim()), 'Download started').catch(()=>{}); });
+  $('#settings-form')?.addEventListener('submit', e => { e.preventDefault(); runAction(e.target.querySelector('button[type=submit]'), ()=>saveSettings(false), 'Settings saved').catch(()=>{}); });
+  $('#gguf-file')?.addEventListener('change', e => { runAction(e.target, uploadModel, 'Uploaded').catch(()=>{}); });
+
+  // Logs & Search
+  $('#log-filter')?.addEventListener('input', () => setText('#logs-output', applyLogFilter(state.lastLogsText)));
+  $('#logs-follow')?.addEventListener('change', syncLogsFollow);
+  $('#global-search')?.addEventListener('input', syncGlobalSearch);
+
+  // Global error handler
+  window.addEventListener('unhandledrejection', e => toast(e.reason?.message || 'Unknown error', 'error'));
+
+  // Boot
+  boot();
 });
 
-bind("#token-form", "submit", (event) => {
-  event.preventDefault();
-  runAction($("#token-form button[type='submit']"), createToken, "Token created").catch(() => {});
-});
-
-bind("#user-form", "submit", (event) => {
-  event.preventDefault();
-  runAction($("#user-form button[type='submit']"), createUser, "User created").catch(() => {});
-});
-
-bind("#hf-form", "submit", (event) => {
-  event.preventDefault();
-  const repo = $("#hf-repo").value.trim();
-  const include = $("#hf-include").value.trim() || "*.gguf";
-  const localDir = $("#hf-dir").value.trim();
-  runAction($("#hf-form button[type='submit']"), () => downloadModel(repo, include, localDir), "Download started").catch(() => {});
-});
-
-bind("#settings-form", "submit", (event) => {
-  event.preventDefault();
-  runAction($("#settings-form button[type='submit']"), () => saveSettings(false), "Settings saved").catch(() => {});
-});
-
-bind("#logs-form", "submit", (event) => {
-  event.preventDefault();
-  runAction($("#logs-form button[type='submit']"), loadLogs, "Logs loaded").catch(() => {});
-});
-
-bind("#log-filter", "input", () => {
-  setText("#logs-output", applyLogFilter(state.lastLogsText));
-});
-
-bind("#logs-follow", "change", syncLogsFollow);
-bind("#global-search", "input", syncGlobalSearch);
-
-window.addEventListener("unhandledrejection", (event) => {
-  pageError(errorText(event.reason));
-});
-
-window.setInterval(() => {
-  if (appVisible() && state.tab === "overview") {
-    loadSystem().catch(() => {});
+const boot = async () => {
+  try {
+    state.user = await api('/me');
+    $('#user-avatar').textContent = state.user.username?.[0]?.toUpperCase() || 'A';
+    $('#user-pill').textContent = state.user.username;
+    $('#user-role').textContent = state.user.is_admin ? 'Administrator' : 'User';
+    $('#login-view')?.classList.add('hidden');
+    $('#app-view')?.classList.remove('hidden');
+    setActiveTab(state.tab || 'dashboard');
+    loadUpdate(false).catch(()=>{});
+    if (state.updateJobId && !state.updateTimer) { state.updateTimer = setInterval(pollUpdateJob, 2500); pollUpdateJob().catch(()=>{}); }
+  } catch {
+    $('#login-view')?.classList.remove('hidden');
+    $('#app-view')?.classList.add('hidden');
   }
-}, 7000);
+};
 
-window.setInterval(() => {
-  if (appVisible()) {
-    loadUpdate(false).catch(() => {});
-  }
-}, 300000);
-
-window.setInterval(() => {
-  if (appVisible() && state.tab === "models") {
-    loadModelJobs(false).catch(() => {});
-  }
-}, 5000);
-
-boot();
+// Auto-refresh
+setInterval(() => { if ($('#app-view') && !$('#app-view').classList.contains('hidden') && state.tab==='dashboard') loadSystem().catch(()=>{}); }, 8000);
+setInterval(() => { if ($('#app-view') && !$('#app-view').classList.contains('hidden')) loadUpdate(false).catch(()=>{}); }, 300000);
+setInterval(() => { if ($('#app-view') && !$('#app-view').classList.contains('hidden') && state.tab==='models') loadModels().catch(()=>{}); }, 5000);

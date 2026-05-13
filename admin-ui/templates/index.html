@@ -1,12 +1,467 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Local AI Admin</title><link rel="stylesheet" href="/static/admin.css"></head>
-<body><div class="sakura"></div><aside class="sidebar glass"><div class="brand"><span class="logo">✦</span><div><b>Local AI</b><small>{{ user.username }}</small></div></div><nav><button data-tab="dash" class="active">Dashboard</button><button data-tab="tokens">Токены</button><button data-tab="models">Модели</button><button data-tab="llama">Llama</button><button data-tab="users">Пользователи</button><button data-tab="clients">Клиенты</button><button data-tab="logs">Логи</button></nav><a class="logout" href="/logout">Выйти</a></aside>
-<main class="content"><header class="hero glass"><div><h1>かわいい AI Control</h1><p>Base URL: <code>{{ base_url }}</code></p></div><div class="actions"><button onclick="project('restart')">Restart</button><button onclick="project('recreate')">Recreate</button><button onclick="refreshAll()">Refresh</button></div></header>
-<section id="dash" class="tab active"><div class="grid cards"><div class="card"><h3>Host</h3><pre id="hostBox">loading...</pre></div><div class="card"><h3>Llama speed</h3><pre id="llamaBox">loading...</pre></div><div class="card wide"><h3>Containers</h3><div id="containers"></div></div></div></section>
-<section id="tokens" class="tab"><div class="panel glass"><h2>Токены</h2><div class="formline"><input id="tokName" placeholder="Имя"><input id="tokLimit" placeholder="Лимит токенов или пусто"><label><input type="checkbox" id="tokUnlimited" checked> безлимит</label><button onclick="createToken()">Создать</button></div><div id="tokensList"></div></div></section>
-<section id="models" class="tab"><div class="panel glass"><h2>Модели</h2><div class="split"><div><h3>Локальные</h3><div id="localModels"></div></div><div><h3>Скачать HF</h3><input id="hfRepo" placeholder="Qwen/Qwen2.5-Coder-7B-Instruct-GGUF"><input id="hfInclude" placeholder="*.gguf / file.gguf"><input id="hfDir" placeholder="local dir"><button onclick="downloadModel()">Скачать</button><h3>Upload GGUF</h3><input type="file" id="ggufFile"><button onclick="uploadModel()">Загрузить</button></div></div><h3>Каталог</h3><div id="catalog"></div></div></section>
-<section id="llama" class="tab"><div class="panel glass"><h2>Llama settings</h2><div class="settings"><label>CTX_SIZE<input id="CTX_SIZE"></label><label>THREADS<input id="THREADS"></label><label>PARALLEL_SLOTS<input id="PARALLEL_SLOTS"></label><label>N_GPU_LAYERS<input id="N_GPU_LAYERS"></label><label>LLAMA_TIMEOUT<input id="LLAMA_TIMEOUT"></label></div><h3>System prompt</h3><textarea id="ANTI_CONFIRM_SYSTEM_PROMPT" rows="5"></textarea><button onclick="saveSettings(true)">Сохранить и применить</button></div></section>
-<section id="users" class="tab"><div class="panel glass"><h2>Пользователи админки</h2><div class="formline"><input id="newUser" placeholder="login"><input id="newPass" placeholder="password"><button onclick="createUser()">Создать</button></div><div id="usersList"></div></div></section>
-<section id="clients" class="tab"><div class="panel glass"><h2>OpenCode / Claude Code / Codex</h2><p>Если сервис выключен, нажми Enable. После включения появятся подсказки.</p><div id="clientsBox"></div><pre class="hint">OpenCode: Provider OpenAI Compatible, Base URL {{ base_url }}, API key = созданный токен.
-Codex: используй codex-runner или локальный Codex CLI. Claude Code proxy экспериментальный.</pre></div></section>
-<section id="logs" class="tab"><div class="panel glass"><h2>Логи</h2><select id="logService"><option>llama-server-coder</option><option>token-gateway</option><option>local-ai-nginx</option><option>postgres</option><option>admin-ui</option><option>claude-code-proxy</option><option>opencode-server</option><option>codex-runner</option></select><button onclick="loadLogs()">Открыть</button><pre id="logsBox" class="logbox"></pre></div></section>
-</main><script src="/static/admin.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local AI Stack — Admin</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="static/style.css">
+    <link rel="stylesheet" href="static/admin.css">
+    
+    <style>
+        /* Inline overrides to ensure smooth load */
+        body { font-family: 'Inter', sans-serif; }
+        code, .mono { font-family: 'JetBrains Mono', monospace; }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        
+        /* Ensure login view is visible by default if JS fails */
+        #login-view { display: flex; }
+        #app-view { display: none; }
+    </style>
+</head>
+<body>
+    <!-- Background Effects -->
+    <div class="bg-grid"></div>
+    <div class="bg-orb one"></div>
+    <div class="bg-orb two"></div>
+
+    <!-- Global UI Containers -->
+    <div id="toast-container" class="toast-container"></div>
+    
+    <div id="modal-backdrop" class="modal-backdrop" onclick="if(event.target===this) closeModal()">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Details</h3>
+                <button class="modal-close" onclick="closeModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="modal-body" id="modal-body">
+                <p>Loading details...</p>
+            </div>
+            <div class="modal-footer" id="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOGIN VIEW -->
+    <div id="login-view" class="login-container fade-in">
+        <div class="login-card">
+            <div class="mascot">⚡</div>
+            <h1 class="login-title">Local AI Stack</h1>
+            <p class="login-subtitle">Secure Admin Access</p>
+            
+            <form id="login-form" class="stack-form" style="margin-top: 32px;">
+                <div id="login-error" class="alert alert-error hidden"></div>
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" id="login-user" class="form-input" placeholder="admin" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" id="login-pass" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary btn-large w-100">Sign In ✦</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- APP VIEW -->
+    <div id="app-view" class="app-layout hidden fade-in">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">⚡</div>
+                <div>
+                    <div class="sidebar-title">Local AI</div>
+                    <div class="sidebar-subtitle">Admin Panel v3.2</div>
+                </div>
+            </div>
+
+            <nav class="nav-list">
+                <div class="nav-label">Monitoring</div>
+                <button class="nav-item active" data-tab="overview">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+                    Dashboard
+                </button>
+                <button class="nav-item" data-tab="monitoring">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
+                    Services
+                </button>
+
+                <div class="nav-label">Management</div>
+                <button class="nav-item" data-tab="tokens">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></span>
+                    Tokens
+                </button>
+                <button class="nav-item" data-tab="users">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87m-4-12a4 4 0 010 7.75"/></svg></span>
+                    Users
+                </button>
+                <button class="nav-item" data-tab="models">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg></span>
+                    Models
+                </button>
+
+                <div class="nav-label">Configuration</div>
+                <button class="nav-item" data-tab="settings">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2m-9-9h2m18 0h2m-2.1-6.1l-1.4 1.4M5.1 18.9l1.4-1.4m0-11l-1.4 1.4m15.3 11.4l-1.4-1.4"/></svg></span>
+                    Llama / Prompt
+                </button>
+                <button class="nav-item" data-tab="clients">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/></svg></span>
+                    Clients
+                </button>
+                <button class="nav-item" data-tab="logs">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8m8 4H8m2-8H8"/></svg></span>
+                    Logs
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-info-sidebar is-collapsed" id="sidebar-user-info">
+                    <button class="user-info-toggle" onclick="toggleUserInfo(this)">
+                        <div class="user-avatar" id="user-avatar">A</div>
+                        <div class="user-name" id="user-pill">admin</div>
+                        <svg class="toggle-icon bi-chevron-down" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                    </button>
+                    <div class="user-info-content">
+                        <div class="user-detail" id="user-role">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                            Admin session
+                        </div>
+                        <div class="footer-actions">
+                            <button class="btn btn-danger w-100 btn-small" data-action="logout">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5-5-5m5 5H9"/></svg>
+                                Logout
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Top Bar -->
+            <header class="top-bar">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <button class="btn btn-secondary btn-icon" id="sidebar-toggle" data-action="toggle-sidebar">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+                    </button>
+                    <div>
+                        <h2 class="page-title" id="page-title">Dashboard</h2>
+                        <p class="page-subtitle" id="page-subtitle">Runtime state, services and stack controls.</p>
+                    </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div class="search-box" style="position:relative;">
+                        <svg style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--text-muted);" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                        <input type="text" id="global-search" class="form-input" placeholder="Search..." style="padding-left:36px; width:200px; background:var(--bg-tertiary); border:none; height:36px;">
+                    </div>
+                    <button class="btn btn-secondary btn-icon" data-action="refresh" title="Refresh">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Alert Banner -->
+            <div id="page-alert" class="alert alert-error hidden"></div>
+
+            <!-- ======================= TABS ======================= -->
+
+            <!-- 1. OVERVIEW -->
+            <div id="tab-overview" class="tab-panel fade-in">
+                <div class="hero-panel">
+                    <div>
+                        <h4 class="eyebrow">Stack Summary</h4>
+                        <h2>Local AI Gateway</h2>
+                        <p>Monitor runtime health, container state and active model.</p>
+                    </div>
+                    <div class="hero-pills">
+                        <div class="hero-pill" id="hero-backend">backend: cpu</div>
+                        <div class="hero-pill" id="hero-model">model: loading...</div>
+                        <div class="hero-pill" id="hero-url">url: http://localhost</div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">CPU Usage</div>
+                        <div class="stat-value" id="metric-cpu">...</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">RAM Usage</div>
+                        <div class="stat-value" id="metric-ram">...</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Prompt Speed</div>
+                        <div class="stat-value" id="metric-speed">...</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Uptime</div>
+                        <div class="stat-value" id="metric-uptime">...</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Containers</h3>
+                        <div class="action-buttons">
+                            <button class="btn btn-secondary btn-small" data-action="stack-restart">Restart Stack</button>
+                        </div>
+                    </div>
+                    <div id="containers-list" class="list-view">
+                        <div class="empty-state">Loading system data...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. SERVICES (Monitoring) -->
+            <div id="tab-monitoring" class="tab-panel hidden fade-in">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Service Management</h3>
+                        <div class="action-buttons">
+                            <button class="btn btn-success btn-small" data-action="stack-start">Start</button>
+                            <button class="btn btn-danger btn-small" data-action="stack-stop">Stop</button>
+                            <button class="btn btn-secondary btn-small" data-action="stack-down">Down</button>
+                            <button class="btn btn-secondary btn-small" data-action="stack-status">Status</button>
+                        </div>
+                    </div>
+                    <div id="services-list" class="list-view">
+                        <div class="empty-state">Loading services...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. TOKENS -->
+            <div id="tab-tokens" class="tab-panel hidden fade-in">
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header"><h3 class="card-title">Create Token</h3></div>
+                    <form id="token-form" class="stack-form" style="grid-template-columns: 1fr 1fr auto; gap:12px; align-items:end;">
+                        <div class="form-group" style="margin:0;">
+                            <label class="form-label">Name</label>
+                            <input type="text" id="token-name" class="form-input" placeholder="my-token" value="token">
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label class="form-label">Limit (Tokens)</label>
+                            <div style="display:flex; gap:8px;">
+                                <input type="number" id="token-limit" class="form-input" placeholder="100000">
+                                <label class="form-checkbox" title="Unlimited" style="align-self:center;">
+                                    <input type="checkbox" id="token-unlimited" checked> ∞
+                                </label>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-small" style="height:40px;">Create ✦</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Token List</h3>
+                        <button class="btn btn-secondary btn-small" data-action="load-tokens">Reload</button>
+                    </div>
+                    <div id="tokens-list" class="list-view">
+                        <div class="empty-state">Loading tokens...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. USERS -->
+            <div id="tab-users" class="tab-panel hidden fade-in">
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header"><h3 class="card-title">Create User</h3></div>
+                    <form id="user-form" class="stack-form" style="grid-template-columns: 1fr 1fr auto; gap:12px; align-items:end;">
+                        <div class="form-group" style="margin:0;">
+                            <label class="form-label">Login</label>
+                            <input type="text" id="new-user" class="form-input" placeholder="username" required>
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label class="form-label">Password</label>
+                            <input type="password" id="new-pass" class="form-input" placeholder="••••••••" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-small" style="height:40px;">Create ✦</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Users</h3>
+                        <button class="btn btn-secondary btn-small" data-action="load-users">Reload</button>
+                    </div>
+                    <div id="users-list" class="list-view">
+                        <div class="empty-state">Loading users...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. MODELS -->
+            <div id="tab-models" class="tab-panel hidden fade-in">
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header"><h3 class="card-title">Active Model</h3></div>
+                    <div style="display:flex; align-items:center; gap:12px; padding:16px; background:var(--bg-tertiary); border-radius:var(--radius-md); border:1px solid var(--border-light);">
+                        <span style="font-size:24px;">🧠</span>
+                        <div>
+                            <div id="model-active-name" style="font-size:16px; font-weight:600;">loading...</div>
+                            <code class="code" id="model-active-path">/models/...</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header">
+                        <h3 class="card-title">Local GGUF Models</h3>
+                        <button class="btn btn-secondary btn-small" data-action="load-models">Reload</button>
+                    </div>
+                    <div id="models-local" class="list-view">
+                        <div class="empty-state">Loading models...</div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header"><h3 class="card-title">Upload GGUF</h3></div>
+                    <form id="upload-form" class="stack-form">
+                        <div class="drop" id="drop-zone" style="border:2px dashed var(--border-medium); border-radius:var(--radius-lg); padding:32px; text-align:center; cursor:pointer;">
+                            <input type="file" id="gguf-file" class="hidden" accept=".gguf">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px; color:var(--text-muted);"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5m5-5v12"/></svg>
+                            <div style="color:var(--text-secondary);">Click to select .gguf file</div>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">Download from HuggingFace</h3></div>
+                    <form id="hf-form" class="stack-form">
+                        <div class="form-group">
+                            <label class="form-label">Repo</label>
+                            <input type="text" id="hf-repo" class="form-input" placeholder="TheBloke/Mistral-7B-Instruct-v0.2-GGUF">
+                        </div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                            <div class="form-group">
+                                <label class="form-label">Include Pattern</label>
+                                <input type="text" id="hf-include" class="form-input" placeholder="*.gguf">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Local Directory</label>
+                                <input type="text" id="hf-dir" class="form-input" placeholder="mistral-7b">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-small" style="align-self:start;">Download ✦</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 6. SETTINGS (Llama / Prompt) -->
+            <div id="tab-settings" class="tab-panel hidden fade-in">
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header"><h3 class="card-title">System Prompt</h3></div>
+                    <div class="form-group">
+                        <label class="form-label">Anti-confirmation System Prompt</label>
+                        <textarea id="prompt" class="form-textarea" rows="6" placeholder="You are a helpful assistant..."></textarea>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3 class="card-title">Llama.cpp Settings</h3></div>
+                    <div id="settings-form-container" class="stack-form">
+                        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:16px;">
+                            <div class="form-group">
+                                <label class="form-label">CTX_SIZE (-c)</label>
+                                <input type="number" id="CTX_SIZE" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">THREADS (-t)</label>
+                                <input type="number" id="THREADS" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">PARALLEL_SLOTS (-np)</label>
+                                <input type="number" id="PARALLEL_SLOTS" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">N_GPU_LAYERS</label>
+                                <input type="number" id="N_GPU_LAYERS" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">LLAMA_TIMEOUT</label>
+                                <input type="number" id="LLAMA_TIMEOUT" class="form-input">
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:12px;">
+                            <button class="btn btn-primary" data-action="save-settings-restart">Save & Restart</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 7. CLIENTS -->
+            <div id="tab-clients" class="tab-panel hidden fade-in">
+                <div class="clients-hero">
+                    <div>
+                        <h4 class="eyebrow">Client Integrations</h4>
+                        <h2>Connect your tools</h2>
+                        <p>Enable, disable and inspect each connector.</p>
+                    </div>
+                    <div class="clients-hero-actions">
+                        <button class="btn btn-secondary btn-small" data-action="client-copy-base">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                            Copy Base URL
+                        </button>
+                        <button class="btn btn-secondary btn-small" data-action="load-clients">Reload</button>
+                    </div>
+                </div>
+                
+                <div id="clients-summary"></div>
+                <div id="clients-list" class="clients-grid">
+                    <div class="empty-state">Loading clients...</div>
+                </div>
+            </div>
+
+            <!-- 8. LOGS -->
+            <div id="tab-logs" class="tab-panel hidden fade-in">
+                <div class="card" style="margin-bottom:16px;">
+                    <form id="logs-form" class="stack-form" style="grid-template-columns: 1fr auto auto auto; gap:12px; align-items:end;">
+                        <div class="form-group" style="margin:0;">
+                            <label class="form-label">Service</label>
+                            <select id="log-service" class="form-select">
+                                <option value="llama-server-coder">llama-server-coder</option>
+                                <option value="token-gateway">token-gateway</option>
+                                <option value="local-ai-nginx">local-ai-nginx</option>
+                                <option value="admin-ui">admin-ui</option>
+                                <option value="postgres">postgres</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label class="form-label">Tail Lines</label>
+                            <input type="number" id="log-tail" class="form-input" value="300" min="10">
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-small" style="height:40px;">Load Logs</button>
+                        <div style="display:flex; align-items:center; gap:8px; height:40px; color:var(--text-secondary);">
+                            <input type="checkbox" id="logs-follow"> <label for="logs-follow">Auto-follow</label>
+                        </div>
+                    </form>
+                    <div class="form-group" style="margin-top:12px;">
+                        <input type="text" id="log-filter" class="form-input" placeholder="Filter logs..." style="height:32px; font-size:12px;">
+                    </div>
+                </div>
+
+                <div class="card">
+                    <pre id="logs-output" class="logs-output">No logs loaded.</pre>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="static/app.js"></script>
+    <script src="static/admin.js"></script>
+</body>
+</html>

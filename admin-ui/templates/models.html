@@ -1,150 +1,135 @@
 {% extends "base.html" %}
 {% block title %}Models{% endblock %}
 {% block content %}
-<div class="container-fluid">
-    {% if message %}
-    <div class="alert alert-info"><i class="fas fa-info-circle"></i> {{ message }}</div>
-    {% endif %}
-    
-    <!-- Active Model -->
-    <div class="row mb-4">
-        <div class="col-12">
-            <div class="card bg-info text-white">
-                <div class="card-body">
-                    <h5 class="card-title"><i class="fas fa-brain"></i> Active Model</h5>
-                    <h3 class="fw-bold">{{ current_model.name if current_model else 'not set' }}</h3>
-                    <p class="mb-0 text-white-50">Switching changes models/current.gguf and restarts llama-server-coder.</p>
-                </div>
-            </div>
-        </div>
+
+<!-- Server Message -->
+{% if message %}
+<div class="alert {% if 'error' in message|lower %}alert-error{% else %}alert-success{% endif %}">
+    {{ message }}
+</div>
+{% endif %}
+
+<!-- Active Model Hero -->
+<div class="hero-panel">
+    <div>
+        <h4 class="eyebrow">Active Model</h4>
+        <h2>{{ current_model.name if current_model else 'Not selected' }}</h2>
+        <p>Switching updates <code>/models/current.gguf</code> and restarts <code>llama-server-coder</code>.</p>
     </div>
-    
-    <div class="row g-4">
-        <!-- Local GGUF Table -->
-        <div class="col-lg-8">
-            <div class="card h-100">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-hdd"></i> Local GGUF Models</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-dark table-striped table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Path</th>
-                                    <th>Size (GB)</th>
-                                    <th>Active</th>
-                                    <th>Action</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for m in models %}
-                                <tr>
-                                    <td>{{ m.name }}</td>
-                                    <td><code class="text-info">{{ m.path }}</code></td>
-                                    <td>{{ m.size_gb }}</td>
-                                    <td>{% if m.active %}<span class="badge bg-success">Yes</span>{% else %}<span class="badge bg-secondary">No</span>{% endif %}</td>
-                                    <td>
-                                        <form method="post" action="{{ base }}/models/switch" class="d-inline">
-                                            <input type="hidden" name="path" value="{{ m.path }}">
-                                            <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-exchange-alt"></i> Switch</button>
-                                        </form>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                                {% if not models %}
-                                <tr><td colspan="5" class="text-center text-muted">No GGUF models found</td></tr>
-                                {% endif %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Upload Form -->
-        <div class="col-lg-4">
-            <div class="card mb-4">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-upload"></i> Upload GGUF</h5>
-                </div>
-                <div class="card-body">
-                    <form method="post" action="{{ base }}/models/upload" enctype="multipart/form-data">
-                        <div class="mb-3">
-                            <label class="form-label">Select File</label>
-                            <input type="file" name="file" class="form-control" required accept=".gguf">
-                        </div>
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" name="switch" class="form-check-input" id="uploadSwitch">
-                            <label class="form-check-label" for="uploadSwitch">Switch after upload</label>
-                        </div>
-                        <button type="submit" class="btn btn-primary w-100"><i class="fas fa-upload"></i> Upload</button>
-                    </form>
-                </div>
-            </div>
-            
-            <!-- HuggingFace Download -->
-            <div class="card">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-download"></i> HuggingFace Download</h5>
-                </div>
-                <div class="card-body">
-                    <form method="post" action="{{ base }}/models/download">
-                        <div class="mb-3">
-                            <label class="form-label">Repo</label>
-                            <input name="repo" class="form-control" placeholder="Qwen/Qwen2.5-Coder-14B-Instruct-GGUF" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Include file/pattern</label>
-                            <input name="include" class="form-control" placeholder="qwen2.5-coder-14b-instruct-q4_k_m.gguf" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Local dir</label>
-                            <input name="local_dir" class="form-control" placeholder="qwen-coder/Qwen2.5-Coder-14B-Instruct-GGUF">
-                        </div>
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" name="switch" class="form-check-input" id="downloadSwitch">
-                            <label class="form-check-label" for="downloadSwitch">Switch after download</label>
-                        </div>
-                        <button type="submit" class="btn btn-success w-100"><i class="fas fa-download"></i> Download</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Catalog Table -->
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-list"></i> Model Catalog</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-dark table-striped table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Title</th>
-                                    <th>Repo</th>
-                                    <th>Include</th>
-                                    <th>Recommended</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for c in catalog %}
-                                <tr>
-                                    <td>{{ c.title }}</td>
-                                    <td><code class="text-info">{{ c.repo }}</code></td>
-                                    <td>{{ c.include }}</td>
-                                    <td>{{ c.recommended or '-' }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <div class="hero-pills">
+        <div class="hero-pill">path: {{ current_model.path if current_model else '-' }}</div>
+        <div class="hero-pill">backend: {{ current_model.backend or 'cpu' }}</div>
     </div>
 </div>
+
+<!-- Local GGUF Models -->
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
+        <h3 class="card-title">Local GGUF Models</h3>
+        <button class="btn btn-secondary btn-small" data-action="load-models">Reload</button>
+    </div>
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Path</th>
+                    <th>Size</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in models %}
+                <tr>
+                    <td><strong>{{ m.name }}</strong></td>
+                    <td><code>{{ m.path }}</code></td>
+                    <td>{{ m.size_gb }} GB</td>
+                    <td>
+                        {% if m.active %}
+                            <span class="status good">active</span>
+                        {% else %}
+                            <span class="status neutral">available</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if not m.active %}
+                            <button class="btn btn-primary btn-small" data-action="model-switch" data-path="{{ m.path }}">Switch</button>
+                        {% else %}
+                            <span class="muted">Current</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not models %}
+                <tr><td colspan="5" class="empty-state">No GGUF models found in ./models</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Upload & Download Grid -->
+<div class="grid-2" style="gap: 20px; margin-bottom: 24px;">
+    <!-- Upload GGUF -->
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Upload GGUF</h3></div>
+        <form id="upload-form" class="stack-form">
+            <div class="drop" id="drop-zone" style="border: 2px dashed var(--border-medium); border-radius: var(--radius-lg); padding: 32px; text-align: center; cursor: pointer; background: var(--bg-tertiary);">
+                <input type="file" id="gguf-file" class="hidden" accept=".gguf">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 12px; color: var(--text-muted);"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5m5-5v12"/></svg>
+                <div style="color: var(--text-secondary);">Click or drag & drop .gguf file</div>
+            </div>
+            <button type="submit" class="btn btn-primary w-100" style="margin-top: 12px;">Upload ✦</button>
+        </form>
+    </div>
+
+    <!-- HuggingFace Download -->
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Download from HuggingFace</h3></div>
+        <form id="hf-form" class="stack-form">
+            <div class="form-group">
+                <label class="form-label">Repository</label>
+                <input type="text" id="hf-repo" class="form-input" placeholder="TheBloke/Mistral-7B-Instruct-v0.2-GGUF" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Include Pattern</label>
+                <input type="text" id="hf-include" class="form-input" placeholder="*.gguf">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Local Directory</label>
+                <input type="text" id="hf-dir" class="form-input" placeholder="mistral-7b">
+            </div>
+            <label class="form-checkbox">
+                <input type="checkbox" name="restart_llama"> Restart llama-server after download
+            </label>
+            <button type="submit" class="btn btn-primary w-100">Download ✦</button>
+        </form>
+    </div>
+</div>
+
+<!-- Model Catalog -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Model Catalog</h3>
+        <span class="status neutral">HuggingFace Presets</span>
+    </div>
+    <div class="clients-grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+        {% for c in catalog %}
+        <div class="catalog-card">
+            <strong>{{ c.title }}</strong>
+            <p>{{ c.recommended or 'No description' }}</p>
+            <code>{{ c.repo }} / {{ c.include }}</code>
+            <button class="btn btn-secondary btn-small" data-action="catalog-download" data-repo="{{ c.repo }}" data-include="{{ c.include }}" data-dir="{{ c.local_dir or '' }}">Download</button>
+        </div>
+        {% endfor %}
+        {% if not catalog %}
+        <div class="empty-state" style="grid-column: 1 / -1;">Catalog is empty. Add presets to config/models.catalog.json</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Jobs Output (for async downloads) -->
+<pre id="jobs-output" class="logs-output hidden" style="margin-top: 16px;"></pre>
+
 {% endblock %}

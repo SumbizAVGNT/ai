@@ -1,114 +1,95 @@
 {% extends "base.html" %}
 {% block title %}Monitoring{% endblock %}
 {% block content %}
-<div class="container-fluid">
-    <div class="row g-4 mb-4">
-        <!-- CPU Card -->
-        <div class="col-md-4">
-            <div class="card bg-primary text-white h-100">
-                <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-white-50"><i class="fas fa-microchip"></i> Host/Container CPU</h6>
-                    <h2 class="display-4 fw-bold">{{ host.cpu }}%</h2>
-                    <div class="progress mt-3" style="height: 10px;">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-light" role="progressbar" style="width: {{ host.cpu }}%"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Memory Card -->
-        <div class="col-md-4">
-            <div class="card bg-success text-white h-100">
-                <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-white-50"><i class="fas fa-memory"></i> Memory</h6>
-                    <h2 class="display-4 fw-bold">{{ (host.mem.percent)|round(1) }}%</h2>
-                    <div class="progress mt-3" style="height: 10px;">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-light" role="progressbar" style="width: {{ host.mem.percent }}%"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Disk Card -->
-        <div class="col-md-4">
-            <div class="card bg-info text-white h-100">
-                <div class="card-body">
-                    <h6 class="card-subtitle mb-2 text-white-50"><i class="fas fa-hdd"></i> Disk</h6>
-                    <h2 class="display-4 fw-bold">{{ (host.disk.percent)|round(1) }}%</h2>
-                    <div class="progress mt-3" style="height: 10px;">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-light" role="progressbar" style="width: {{ host.disk.percent }}%"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
+
+<!-- Hero / Host Stats -->
+<div class="hero-panel">
+    <div>
+        <h4 class="eyebrow">Host & Container Metrics</h4>
+        <h2>Real-time Monitoring</h2>
+        <p>CPU, memory, disk usage and llama.cpp throughput at a glance.</p>
     </div>
-    
-    <div class="row g-4">
-        <!-- Containers Table -->
-        <div class="col-lg-8">
-            <div class="card h-100">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fab fa-docker"></i> Containers</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-dark table-striped table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Container</th>
-                                    <th>Status</th>
-                                    <th>CPU</th>
-                                    <th>RAM</th>
-                                    <th>Mem MB</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for s in stats %}
-                                <tr>
-                                    <td><strong>{{ s.name }}</strong></td>
-                                    <td><span class="badge {% if s.status == 'running' %}bg-success{% else %}bg-secondary{% endif %}">{{ s.status }}</span></td>
-                                    <td>{{ s.cpu_pct }}%</td>
-                                    <td>
-                                        <div class="progress" style="height: 8px; width: 100px;">
-                                            <div class="progress-bar bg-info" role="progressbar" style="width: {{ s.mem_pct }}%"></div>
-                                        </div>
-                                    </td>
-                                    <td>{{ s.mem_mb }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+</div>
+
+<!-- Host Resources Grid -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Host CPU</div>
+        <div class="stat-value">{{ host.cpu }}%</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Memory Usage</div>
+        <div class="stat-value">{{ (host.mem.percent)|round(1) }}%</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Disk Usage</div>
+        <div class="stat-value">{{ (host.disk.percent)|round(1) }}%</div>
+    </div>
+</div>
+
+<!-- Containers Table -->
+<div class="card" style="margin-bottom: 20px;">
+    <div class="card-header">
+        <h3 class="card-title">Container Resources</h3>
+    </div>
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Container</th>
+                    <th>Status</th>
+                    <th>CPU</th>
+                    <th>Memory</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in stats %}
+                <tr>
+                    <td><strong>{{ s.name }}</strong></td>
+                    <td>
+                        {% if 'running' in s.status|lower %}
+                            <span class="status good">running</span>
+                        {% elif 'exited' in s.status|lower or 'stopped' in s.status|lower %}
+                            <span class="status warn">stopped</span>
+                        {% else %}
+                            <span class="status neutral">{{ s.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ s.cpu_pct }}%</td>
+                    <td>{{ s.mem_mb }} MB</td>
+                </tr>
+                {% endfor %}
+                {% if not stats %}
+                <tr><td colspan="4" class="empty-state">No container stats available</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Llama Throughput -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Llama Throughput</h3>
+    </div>
+    <div class="stats-grid" style="margin-bottom: 0;">
+        <div class="stat-card">
+            <div class="stat-label">Last Prompt Tokens</div>
+            <div class="stat-value">{{ metrics.last_prompt_tokens }}</div>
         </div>
-        
-        <!-- Llama Throughput -->
-        <div class="col-lg-4">
-            <div class="card h-100 bg-warning text-dark">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-bolt"></i> Llama Throughput</h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-4">
-                        <label class="text-muted small">Last Prompt Tokens</label>
-                        <h3 class="fw-bold">{{ metrics.last_prompt_tokens }}</h3>
-                    </div>
-                    <div class="mb-4">
-                        <label class="text-muted small">Prompt Speed</label>
-                        <h3 class="fw-bold">{{ metrics.prompt_tps }} <span class="fs-6 text-muted">tok/s</span></h3>
-                    </div>
-                    <div class="mb-4">
-                        <label class="text-muted small">Eval Speed</label>
-                        <h3 class="fw-bold">{{ metrics.eval_tps }} <span class="fs-6 text-muted">tok/s</span></h3>
-                    </div>
-                    <div>
-                        <label class="text-muted small">Estimated Prompt Time</label>
-                        <h3 class="fw-bold">{{ metrics.estimate_sec or 'n/a' }} <span class="fs-6 text-muted">sec</span></h3>
-                    </div>
-                </div>
-            </div>
+        <div class="stat-card">
+            <div class="stat-label">Prompt Speed</div>
+            <div class="stat-value">{{ metrics.prompt_tps }} tok/s</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Eval Speed</div>
+            <div class="stat-value">{{ metrics.eval_tps }} tok/s</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Estimated Prompt Time</div>
+            <div class="stat-value">{{ metrics.estimate_sec or 'n/a' }} sec</div>
         </div>
     </div>
 </div>
+
 {% endblock %}

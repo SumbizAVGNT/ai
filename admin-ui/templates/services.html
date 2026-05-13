@@ -1,61 +1,80 @@
 {% extends "base.html" %}
 {% block title %}Services{% endblock %}
 {% block content %}
-<div class="container-fluid">
-    {% if message %}
-    <div class="alert alert-info"><i class="fas fa-info-circle"></i> {{ message }}</div>
-    {% endif %}
-    
-    <div class="row">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header bg-dark">
-                    <h5 class="card-title mb-0"><i class="fas fa-server"></i> Service Management</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-dark table-striped table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Status</th>
-                                    <th>Image</th>
-                                    <th>Ports</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for s in services %}
-                                <tr>
-                                    <td><strong>{{ s.name }}</strong></td>
-                                    <td>
-                                        <span class="badge {% if s.status == 'running' %}bg-success{% elif s.status == 'stopped' %}bg-danger{% elif s.status == 'restarting' %}bg-warning{% else %}bg-secondary{% endif %}">
-                                            {{ s.status }}
-                                        </span>
-                                    </td>
-                                    <td><code class="text-info">{{ s.image }}</code></td>
-                                    <td>{{ s.ports or '-' }}</td>
-                                    <td>
-                                        <div class="btn-group btn-group-sm">
-                                            <form method="post" action="{{ base }}/services/{{ s.name }}/start" class="d-inline">
-                                                <button type="submit" class="btn btn-success" title="Start"><i class="fas fa-play"></i></button>
-                                            </form>
-                                            <form method="post" action="{{ base }}/services/{{ s.name }}/restart" class="d-inline">
-                                                <button type="submit" class="btn btn-warning" title="Restart"><i class="fas fa-redo"></i></button>
-                                            </form>
-                                            <form method="post" action="{{ base }}/services/{{ s.name }}/stop" class="d-inline">
-                                                <button type="submit" class="btn btn-danger" title="Stop"><i class="fas fa-stop"></i></button>
-                                            </form>
-                                        </div>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
+
+<!-- Server Message -->
+{% if message %}
+<div class="alert {% if 'error' in message|lower %}alert-error{% else %}alert-success{% endif %}">
+    {{ message }}
+</div>
+{% endif %}
+
+<!-- Hero Panel -->
+<div class="hero-panel">
+    <div>
+        <h4 class="eyebrow">Stack Management</h4>
+        <h2>Service Management</h2>
+        <p>Control individual containers, view statuses and manage the compose stack.</p>
+    </div>
+    <div class="action-buttons">
+        <button class="btn btn-success btn-small" data-action="stack-start">Start Stack</button>
+        <button class="btn btn-danger btn-small" data-action="stack-stop">Stop Stack</button>
+        <button class="btn btn-secondary btn-small" data-action="stack-restart">Restart Stack</button>
     </div>
 </div>
+
+<!-- Services Table -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Active Services</h3>
+        <span class="status neutral">{{ services|length }} detected</span>
+    </div>
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Service</th>
+                    <th>Status</th>
+                    <th>Image</th>
+                    <th>Ports</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in services %}
+                <tr>
+                    <td><strong>{{ s.name }}</strong></td>
+                    <td>
+                        {% if 'running' in s.status|lower %}
+                            <span class="status good">running</span>
+                        {% elif 'exited' in s.status|lower or 'stopped' in s.status|lower or 'dead' in s.status|lower %}
+                            <span class="status warn">stopped</span>
+                        {% else %}
+                            <span class="status neutral">{{ s.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td><code>{{ s.image or '-' }}</code></td>
+                    <td>{{ s.ports or '-' }}</td>
+                    <td class="action-buttons">
+                        {% if 'running' in s.status|lower %}
+                            <button class="btn btn-secondary btn-small" data-action="container-restart" data-container="{{ s.name }}">Restart</button>
+                            {% if s.name != 'admin-ui' %}
+                            <button class="btn btn-danger btn-small" data-action="container-stop" data-container="{{ s.name }}">Stop</button>
+                            {% endif %}
+                        {% else %}
+                            <button class="btn btn-success btn-small" data-action="container-start" data-container="{{ s.name }}">Start</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not services %}
+                <tr>
+                    <td colspan="5" class="empty-state">No services detected. Start the stack to view containers.</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
 {% endblock %}

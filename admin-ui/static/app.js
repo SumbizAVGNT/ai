@@ -10,7 +10,7 @@ const APP_BASE = window.location.pathname === "/ui" || window.location.pathname.
 const state = {
   tab: "overview",
   me: null,
-  updateJobId: null,
+  updateJobId: window.localStorage?.getItem("localAiUpdateJobId") || null,
   updatePollTimer: null,
   logsFollowTimer: null,
   lastLogsText: "",
@@ -277,6 +277,10 @@ async function boot() {
     showApp();
     setActiveTab(state.tab || "overview");
     loadUpdate(false).catch(() => {});
+    if (state.updateJobId && !state.updatePollTimer) {
+      state.updatePollTimer = window.setInterval(() => pollUpdateJob().catch(() => {}), 2500);
+      pollUpdateJob().catch(() => {});
+    }
   } catch {
     showLogin();
   }
@@ -899,6 +903,10 @@ function renderUpdateJob(job) {
     setUpdateState("bad", "Failed");
     $("#update-title").textContent = "Update failed";
     $("#update-copy").textContent = job.error || "Check the update output.";
+  } else if (job.status === "restarting" || job.step === "restarting-admin-ui") {
+    setUpdateState("warn", "Restarting");
+    $("#update-title").textContent = "Admin UI is restarting";
+    $("#update-copy").textContent = job.message || "The page can disconnect briefly; it will reconnect when the panel is back.";
   } else {
     setUpdateState("warn", "Updating");
     $("#update-title").textContent = "Downloading and restarting";
@@ -914,6 +922,7 @@ async function pollUpdateJob() {
     window.clearInterval(state.updatePollTimer);
     state.updatePollTimer = null;
     state.updateJobId = null;
+    window.localStorage?.removeItem("localAiUpdateJobId");
     await loadUpdate(false).catch(() => {});
   }
 }
@@ -923,6 +932,7 @@ async function applyUpdate() {
   $("#update-progress").textContent = "Queued...";
   const result = await api("/update/apply", { method: "POST", body: "{}" });
   state.updateJobId = result.job_id;
+  window.localStorage?.setItem("localAiUpdateJobId", state.updateJobId);
   if (state.updatePollTimer) window.clearInterval(state.updatePollTimer);
   state.updatePollTimer = window.setInterval(() => pollUpdateJob().catch(() => {}), 2500);
   await pollUpdateJob();

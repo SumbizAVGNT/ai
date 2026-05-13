@@ -3,6 +3,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -37,7 +38,8 @@ SECRET_KEY = os.getenv("ADMIN_UI_SECRET", os.getenv("ADMIN_WEB_SECRET", "local-a
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////data/admin.db")
 DEFAULT_ADMIN_USER = os.getenv("ADMIN_UI_USER", os.getenv("ADMIN_WEB_USERNAME", "admin"))
 DEFAULT_ADMIN_PASSWORD = os.getenv("ADMIN_UI_PASSWORD", os.getenv("ADMIN_WEB_PASSWORD", "admin"))
-SYNC_DEFAULT_ADMIN = os.getenv("ADMIN_UI_SYNC_DEFAULT_CREDENTIALS", "1").lower() not in {"0", "false", "no"}
+SYNC_DEFAULT_ADMIN = os.getenv("ADMIN_UI_SYNC_DEFAULT_CREDENTIALS", "0").lower() not in {"0", "false", "no"}
+UPDATE_JOBS_DIR = STACK_ROOT / "data" / "update-jobs"
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 BCRYPT_MAX_BYTES = 72
@@ -167,12 +169,13 @@ def init_db() -> None:
             return
 
         first_admin = db.execute(select(User).where(User.is_admin == True).order_by(User.id)).scalars().first()
-        if first_admin and SYNC_DEFAULT_ADMIN:
-            first_admin.username = DEFAULT_ADMIN_USER
-            first_admin.password_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
-            first_admin.enabled = True
-            first_admin.updated_at = int(time.time())
-            db.commit()
+        if first_admin:
+            if SYNC_DEFAULT_ADMIN:
+                first_admin.username = DEFAULT_ADMIN_USER
+                first_admin.password_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
+                first_admin.enabled = True
+                first_admin.updated_at = int(time.time())
+                db.commit()
             return
 
         db.add(User(username=DEFAULT_ADMIN_USER, password_hash=hash_password(DEFAULT_ADMIN_PASSWORD), is_admin=True, enabled=True))
@@ -402,13 +405,14 @@ def remove_conflicting_container(service: str) -> dict[str, Any]:
     return {"service": service, "removed": removed, "errors": errors}
 
 
-def run_compose_up_sequential(force_recreate: bool = False, services: Optional[list[str]] = None, timeout: int = 900) -> dict[str, Any]:
-    selected = services or compose_services()
+def run_compose_up_sequential(force_recreate: bool = False, services: Optional[list[str]] = None, timeout: int = 900, stop_nginx: bool = True) -> dict[str, Any]:
+    selected = compose_services() if services is None else services
     stdout: list[str] = [f"Starting services one by one (COMPOSE_PARALLEL_LIMIT={compose_env()['COMPOSE_PARALLEL_LIMIT']})\n"]
     stderr: list[str] = []
     last: dict[str, Any] = {"cmd": ["docker", "compose", "up"], "returncode": 0, "stdout": "", "stderr": ""}
 
-    run_compose(["stop", "nginx"], timeout=30)
+    if stop_nginx and "nginx" in selected:
+        run_compose(["stop", "nginx"], timeout=30)
 
     for service in selected:
         stdout.append(f"\n== Pull {service} ==\n")
@@ -454,6 +458,35 @@ def run_git(args: list[str], timeout: int = 30) -> dict[str, Any]:
 
 def clean_output(result: dict[str, Any]) -> str:
     return ((result.get("stdout") or "") + (result.get("stderr") or "")).strip()
+
+
+def update_job_path(job_id: str) -> Path:
+    return UPDATE_JOBS_DIR / f"{job_id}.json"
+
+
+def persist_update_job(job_id: str) -> None:
+    try:
+        UPDATE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+        target = update_job_path(job_id)
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(json.dumps(jobs.get(job_id, {}), ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        tmp.replace(target)
+    except Exception:
+        pass
+
+
+def load_update_job(job_id: str) -> Optional[dict[str, Any]]:
+    try:
+        target = update_job_path(job_id)
+        if not target.exists():
+            return None
+        data = json.loads(target.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            jobs[job_id] = data
+            return data
+    except Exception:
+        return None
+    return None
 
 
 def git_value(args: list[str], default: str = "", timeout: int = 30) -> str:
@@ -585,6 +618,99 @@ def regenerate_compose_config(previous_compose: str = "") -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+def schedule_admin_ui_restart(job_id: str) -> dict[str, Any]:
+    image = run_docker(["inspect", "-f", "{{.Image}}", "admin-ui"], timeout=20)
+    if image["returncode"] != 0:
+        return {"ok": False, "image": image, "result": None}
+
+    image_id = (image.get("stdout") or "").strip()
+    if not image_id:
+        return {"ok": False, "image": image, "result": {"returncode": 1, "stdout": "", "stderr": "admin-ui image id is empty"}}
+
+    UPDATE_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = UPDATE_JOBS_DIR / f"{job_id}.restart.log"
+    script_path = UPDATE_JOBS_DIR / f"{job_id}.restart.sh"
+    job_path = update_job_path(job_id)
+    project = shlex.quote(str(PROJECT_ROOT))
+    job_file = shlex.quote(str(job_path))
+    log_file = shlex.quote(str(log_path))
+
+    script_path.write_text(f"""#!/bin/sh
+set +e
+cd {project} || exit 1
+JOB_FILE={job_file}
+LOG_FILE={log_file}
+write_job() {{
+  python - "$JOB_FILE" "$1" "$2" "$3" "$LOG_FILE" "$4" "$5" <<'PY'
+import json
+import pathlib
+import sys
+import time
+
+job_file = pathlib.Path(sys.argv[1])
+status = sys.argv[2]
+step = sys.argv[3]
+error = sys.argv[4]
+log_file = sys.argv[5]
+admin_rc = int(sys.argv[6])
+nginx_rc = int(sys.argv[7])
+try:
+    data = json.loads(job_file.read_text(encoding="utf-8"))
+except Exception:
+    data = {{}}
+data.update({{
+    "status": status,
+    "step": step,
+    "finished_at": int(time.time()),
+    "message": "Update applied and admin UI restarted." if status == "done" else "",
+    "error": error,
+    "admin_ui_restart": {{"returncode": admin_rc}},
+    "nginx_restart": {{"returncode": nginx_rc}},
+    "restart_log": str(log_file),
+}})
+tmp = job_file.with_suffix(".tmp")
+tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+tmp.replace(job_file)
+PY
+}}
+
+echo "== $(date -Iseconds) recreate admin-ui ==" > "$LOG_FILE"
+docker compose up -d --no-deps --no-build --force-recreate admin-ui >> "$LOG_FILE" 2>&1
+admin_rc=$?
+echo "admin-ui returncode: $admin_rc" >> "$LOG_FILE"
+
+nginx_rc=0
+if [ "$admin_rc" -eq 0 ]; then
+  echo "== $(date -Iseconds) ensure nginx ==" >> "$LOG_FILE"
+  docker compose up -d --no-deps nginx >> "$LOG_FILE" 2>&1
+  nginx_rc=$?
+  echo "nginx returncode: $nginx_rc" >> "$LOG_FILE"
+else
+  nginx_rc=1
+fi
+
+if [ "$admin_rc" -eq 0 ] && [ "$nginx_rc" -eq 0 ]; then
+  write_job done complete "" "$admin_rc" "$nginx_rc"
+else
+  write_job error failed "admin-ui restart failed; see $LOG_FILE" "$admin_rc" "$nginx_rc"
+fi
+""", encoding="utf-8")
+    script_path.chmod(0o755)
+
+    helper_name = f"local-ai-admin-update-{job_id[:8]}"
+    run_docker(["rm", "-f", helper_name], timeout=20)
+    result = run_docker([
+        "run", "-d", "--rm",
+        "--name", helper_name,
+        "--volumes-from", "admin-ui",
+        "-v", "/var/run/docker.sock:/var/run/docker.sock",
+        "-w", str(PROJECT_ROOT),
+        image_id,
+        "/bin/sh", str(script_path),
+    ], timeout=30)
+    return {"ok": result["returncode"] == 0, "image": image, "script": str(script_path), "log": str(log_path), "result": result}
+
+
 def git_update_status(fetch: bool = True) -> dict[str, Any]:
     if not (PROJECT_ROOT / ".git").exists():
         return {"configured": False, "error": "This stack is not installed from a git repository."}
@@ -648,6 +774,7 @@ def git_update_status(fetch: bool = True) -> dict[str, Any]:
 def update_worker(job_id: str) -> None:
     def mark(**data: Any) -> None:
         jobs[job_id].update(data)
+        persist_update_job(job_id)
 
     mark(status="running", step="checking", started_at=int(time.time()))
     status = git_update_status(fetch=True)
@@ -712,14 +839,32 @@ def update_worker(job_id: str) -> None:
             mark(status="error", step="failed", error=nginx_result.get("error", "Could not regenerate nginx/default.conf"), finished_at=int(time.time()))
             return
 
-    mark(step="restarting")
-    compose = run_compose_up_sequential(timeout=900)
+    services = compose_services()
+    non_admin_services = [service for service in services if service != "admin-ui"]
+
+    mark(step="restarting-services", services=non_admin_services)
+    compose = run_compose_up_sequential(services=non_admin_services, timeout=900, stop_nginx=False)
     mark(compose=compose)
     if compose["returncode"] != 0:
         mark(status="error", step="failed", error=clean_output(compose), finished_at=int(time.time()))
         return
 
-    mark(status="done", step="complete", finished_at=int(time.time()), status_data=git_update_status(fetch=False))
+    if "admin-ui" in services:
+        mark(step="building-admin-ui", message="Admin UI image is building before a safe self-restart.")
+        build = run_compose_retry(["build", "admin-ui"], timeout=900)
+        mark(admin_ui_build=build)
+        if build["returncode"] != 0:
+            mark(status="error", step="failed", error=clean_output(build), finished_at=int(time.time()))
+            return
+
+        mark(status="restarting", step="restarting-admin-ui", message="Admin UI is restarting; the page may disconnect briefly.")
+        restart = schedule_admin_ui_restart(job_id)
+        mark(admin_ui_restart_scheduled=restart)
+        if not restart.get("ok"):
+            mark(status="error", step="failed", error=clean_output(restart.get("result") or restart.get("image") or {}), finished_at=int(time.time()))
+        return
+
+    mark(status="done", step="complete", message="Update applied and services restarted.", finished_at=int(time.time()), status_data=git_update_status(fetch=False))
 
 
 def token_gateway_headers() -> dict[str, str]:
@@ -981,12 +1126,13 @@ def api_update_status(fetch: bool = True, _: User = Depends(current_user)):
 def api_update_apply(_: User = Depends(current_user)):
     job_id = secrets.token_hex(8)
     jobs[job_id] = {"type": "stack-update", "status": "queued", "step": "queued", "created_at": int(time.time())}
+    persist_update_job(job_id)
     threading.Thread(target=update_worker, args=(job_id,), daemon=True).start()
     return {"ok": True, "job_id": job_id}
 
 @app.get("/api/update/jobs/{job_id}")
 def api_update_job(job_id: str, _: User = Depends(current_user)):
-    job = jobs.get(job_id)
+    job = jobs.get(job_id) or load_update_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
     return job

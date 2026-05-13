@@ -77,6 +77,20 @@ COMPOSE_LOG_SERVICES = {
     "local-ai-certbot": "certbot",
     "certbot": "certbot",
 }
+CLIENT_SERVICES = {
+    "opencode": {
+        "service": "opencode-server",
+        "enable_args": ["--profile", "tools", "up", "-d", "--build", "--no-deps", "opencode-server"],
+    },
+    "codex": {
+        "service": "codex-runner",
+        "enable_args": ["--profile", "tools", "up", "-d", "--build", "--no-deps", "codex-runner"],
+    },
+    "claude": {
+        "service": "claude-code-proxy",
+        "enable_args": ["--profile", "claude", "up", "-d", "--build", "--no-deps", "claude-code-proxy"],
+    },
+}
 
 
 @app.middleware("http")
@@ -1040,7 +1054,8 @@ def api_clients(_: User = Depends(current_user)):
     status = {}
     try:
         client = docker.from_env()
-        for name in ["opencode-server", "codex-runner", "claude-code-proxy"]:
+        for config in CLIENT_SERVICES.values():
+            name = config["service"]
             try:
                 c = client.containers.get(name)
                 status[name] = c.status
@@ -1049,22 +1064,18 @@ def api_clients(_: User = Depends(current_user)):
     except Exception:
         status = {}
     return {
-        "opencode": {"enabled": status.get("opencode-server") == "running", "defined": "opencode-server:" in compose, "hint": "OpenCode Desktop connects to opencode serve at http://localhost:4096, model provider points to /v1."},
-        "codex": {"enabled": status.get("codex-runner") == "running", "defined": "codex-runner:" in compose, "hint": "Codex helper uses @openai/codex. Configure OPENAI_API_KEY or use your /v1 endpoint if supported by your client."},
-        "claude": {"enabled": status.get("claude-code-proxy") == "running", "defined": "claude-code-proxy:" in compose, "hint": "Claude Code proxy is experimental; OpenAI-compatible clients are preferred."},
-        "openrouter": {"enabled": True, "defined": True, "external": True, "hint": "OpenRouter is an external OpenAI-compatible API. No local proxy or container is needed."},
+        "opencode": {"enabled": status.get("opencode-server") == "running", "status": status.get("opencode-server", "unknown"), "defined": "opencode-server:" in compose, "service": "opencode-server", "hint": "OpenCode Desktop connects to opencode serve at http://localhost:4096, model provider points to /v1."},
+        "codex": {"enabled": status.get("codex-runner") == "running", "status": status.get("codex-runner", "unknown"), "defined": "codex-runner:" in compose, "service": "codex-runner", "hint": "Codex helper uses @openai/codex. Configure OPENAI_API_KEY or use your /v1 endpoint if supported by your client."},
+        "claude": {"enabled": status.get("claude-code-proxy") == "running", "status": status.get("claude-code-proxy", "unknown"), "defined": "claude-code-proxy:" in compose, "service": "claude-code-proxy", "hint": "Claude Code proxy is experimental; OpenAI-compatible clients are preferred."},
+        "openrouter": {"enabled": True, "status": "external", "defined": True, "external": True, "service": "", "hint": "OpenRouter is an external OpenAI-compatible API. No local proxy or container is needed."},
     }
 
 @app.post("/api/clients/{client}/enable")
 def api_enable_client(client: str, _: User = Depends(current_user)):
-    mapping = {
-        "opencode": (["--profile", "tools", "up", "-d", "--build", "--no-deps", "opencode-server"], "opencode-server"),
-        "codex": (["--profile", "tools", "up", "-d", "--build", "--no-deps", "codex-runner"], "codex-runner"),
-        "claude": (["--profile", "claude", "up", "-d", "--build", "--no-deps", "claude-code-proxy"], "claude-code-proxy"),
-    }
-    if client not in mapping:
+    if client not in CLIENT_SERVICES:
         raise HTTPException(status_code=400, detail="unknown client")
-    args, service = mapping[client]
+    config = CLIENT_SERVICES[client]
+    service = config["service"]
     compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8") if (PROJECT_ROOT / "docker-compose.yml").exists() else ""
     enable_result = None
     if f"{service}:" not in compose_text:
@@ -1072,5 +1083,27 @@ def api_enable_client(client: str, _: User = Depends(current_user)):
         if enable_result["returncode"] != 0:
             return {"ok": False, "service": service, "enable": enable_result, "result": None}
     remove_conflicting_container(service)
-    result = run_compose(args, timeout=600)
+    result = run_compose(config["enable_args"], timeout=600)
     return {"ok": result["returncode"] == 0, "service": service, "enable": enable_result, "result": result}
+
+@app.post("/api/clients/{client}/disable")
+def api_disable_client(client: str, _: User = Depends(current_user)):
+    if client not in CLIENT_SERVICES:
+        raise HTTPException(status_code=400, detail="unknown client")
+    service = CLIENT_SERVICES[client]["service"]
+    compose_text = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8") if (PROJECT_ROOT / "docker-compose.yml").exists() else ""
+    if f"{service}:" in compose_text:
+        result = run_compose(["stop", service], timeout=180)
+        return {"ok": result["returncode"] == 0, "service": service, "result": result}
+
+    listed = run_docker(["ps", "-aq", "--filter", f"name=^/{service}$"], timeout=20)
+    if listed["returncode"] != 0:
+        return {"ok": False, "service": service, "result": listed}
+    if not (listed.get("stdout") or "").strip():
+        return {
+            "ok": True,
+            "service": service,
+            "result": {"cmd": ["docker", "stop", service], "returncode": 0, "stdout": f"{service} is already disabled\n", "stderr": ""},
+        }
+    result = run_docker(["stop", service], timeout=90)
+    return {"ok": result["returncode"] == 0, "service": service, "result": result}

@@ -14,6 +14,7 @@ const state = {
   updatePollTimer: null,
   logsFollowTimer: null,
   lastLogsText: "",
+  clientsBaseUrl: "",
 };
 
 const subtitles = {
@@ -208,8 +209,8 @@ function renderEmpty(target, message) {
   setHtml(target, `<div class="empty">${escapeHtml(message)}</div>`);
 }
 
-function showCommandOutput(title, result) {
-  const box = $("#command-output");
+function showCommandOutput(title, result, target = "#command-output") {
+  const box = $(target);
   if (!box) return;
   const stdout = result?.stdout || "";
   const stderr = result?.stderr || "";
@@ -614,16 +615,19 @@ async function loadClients() {
     api("/settings").catch(() => ({})),
   ]);
   const baseUrl = String(settings.public_base_url || window.location.origin).replace(/\/$/, "");
+  state.clientsBaseUrl = `${baseUrl}/v1`;
   const modelName = settings.model_path ? settings.model_path.split("/").pop() : "active GGUF model";
   const meta = {
     opencode: {
       title: "OpenCode Desktop",
       icon: "bi-code-slash",
       tone: "recommended",
-      command: "docker compose --profile tools up -d opencode-server",
+      provider: "OpenAI Compatible",
+      startCommand: "docker compose --profile tools up -d opencode-server",
+      stopCommand: "docker compose stop opencode-server",
       steps: [
         ["Provider", "OpenAI Compatible"],
-        ["Base URL", `${baseUrl}/v1`],
+        ["Base URL", state.clientsBaseUrl],
         ["API key", "Token from Tokens tab"],
         ["Model", modelName],
       ],
@@ -632,9 +636,11 @@ async function loadClients() {
       title: "Codex Runner",
       icon: "bi-terminal",
       tone: "tools",
-      command: "docker compose --profile tools run --rm codex-runner",
+      provider: "OpenAI SDK",
+      startCommand: "docker compose --profile tools up -d codex-runner",
+      stopCommand: "docker compose stop codex-runner",
       steps: [
-        ["OPENAI_BASE_URL", `${baseUrl}/v1`],
+        ["OPENAI_BASE_URL", state.clientsBaseUrl],
         ["OPENAI_API_KEY", "Token from Tokens tab"],
         ["Model", modelName],
       ],
@@ -643,10 +649,12 @@ async function loadClients() {
       title: "Claude Code Proxy",
       icon: "bi-bezier2",
       tone: "experimental",
-      command: "docker compose --profile claude up -d claude-code-proxy",
+      provider: "Proxy",
+      startCommand: "docker compose --profile claude up -d claude-code-proxy",
+      stopCommand: "docker compose stop claude-code-proxy",
       steps: [
         ["Status", "Experimental local proxy"],
-        ["Base URL", `${baseUrl}/v1`],
+        ["Base URL", state.clientsBaseUrl],
         ["API key", "Token from Tokens tab"],
       ],
     },
@@ -654,7 +662,9 @@ async function loadClients() {
       title: "OpenRouter",
       icon: "bi-cloud-arrow-up",
       tone: "external",
-      command: "No local container is required.",
+      provider: "External",
+      startCommand: "No local container is required.",
+      stopCommand: "Managed outside this stack.",
       steps: [
         ["Base URL", "https://openrouter.ai/api/v1"],
         ["API key", "OpenRouter key"],
@@ -666,39 +676,82 @@ async function loadClients() {
   const entries = Object.entries(data);
   if (!entries.length) {
     renderEmpty("#clients-list", "No clients are configured.");
+    setHtml("#clients-summary", "");
     return;
   }
+
+  const localEntries = entries.filter(([, client]) => !client.external);
+  const runningCount = localEntries.filter(([, client]) => client.enabled).length;
+  const definedCount = localEntries.filter(([, client]) => client.defined).length;
+  const externalCount = entries.filter(([, client]) => client.external).length;
+  setHtml("#clients-summary", `
+    <div class="client-summary-card">
+      <span class="client-summary-label">Running</span>
+      <strong>${runningCount}/${localEntries.length}</strong>
+    </div>
+    <div class="client-summary-card">
+      <span class="client-summary-label">Compose Ready</span>
+      <strong>${definedCount}/${localEntries.length}</strong>
+    </div>
+    <div class="client-summary-card">
+      <span class="client-summary-label">External</span>
+      <strong>${externalCount}</strong>
+    </div>
+    <div class="client-summary-card client-summary-wide">
+      <span class="client-summary-label">Base URL</span>
+      <code>${escapeHtml(state.clientsBaseUrl)}</code>
+    </div>
+  `);
 
   setHtml("#clients-list", entries.map(([name, client]) => {
     const info = meta[name] || {
       title: name,
       icon: "bi-box",
       tone: "tools",
-      command: "",
-      steps: [["Base URL", `${baseUrl}/v1`]],
+      provider: "OpenAI Compatible",
+      startCommand: "",
+      stopCommand: "",
+      steps: [["Base URL", state.clientsBaseUrl]],
     };
     const external = Boolean(client.external);
-    const statusClass = external || client.enabled ? "good" : "bad";
-    const statusLabel = external ? "external" : (client.enabled ? "running" : "off");
+    const rawStatus = String(client.status || "").trim();
+    const statusClass = external || client.enabled ? "good" : (rawStatus === "exited" || rawStatus === "created" ? "warn" : "bad");
+    const statusLabel = external ? "external" : (client.enabled ? "running" : (rawStatus && rawStatus !== "unknown" ? rawStatus : "off"));
     const composeLabel = external ? "external service" : (client.defined ? "compose ready" : "compose missing");
-    const action = external
-      ? `<span class="status good">No local action</span>`
-      : `<button class="btn btn-primary btn-small" data-action="client-enable" data-client="${escapeHtml(name)}" ${client.enabled ? "disabled" : ""}>
+    const service = client.service || "";
+    const cardState = external ? "external" : (client.enabled ? "running" : "stopped");
+    const primaryAction = external
+      ? `<span class="status good">Managed externally</span>`
+      : client.enabled
+        ? `<button class="btn btn-danger btn-small" data-action="client-disable" data-client="${escapeHtml(name)}">
+          <i class="bi bi-stop-fill" aria-hidden="true"></i>
+          Disable
+        </button>`
+        : `<button class="btn btn-primary btn-small" data-action="client-enable" data-client="${escapeHtml(name)}">
           <i class="bi bi-play-fill" aria-hidden="true"></i>
-          ${client.enabled ? "Enabled" : "Enable"}
+          ${client.defined ? "Enable" : "Install & Enable"}
         </button>`;
+    const logsAction = service
+      ? `<button class="btn btn-secondary btn-small" data-action="client-logs" data-service="${escapeHtml(service)}" ${client.enabled ? "" : "disabled"}>
+          <i class="bi bi-journal-text" aria-hidden="true"></i>
+          Logs
+        </button>`
+      : "";
+    const command = client.enabled ? info.stopCommand : info.startCommand;
     return `
-      <article class="client-card client-${escapeHtml(info.tone)}">
+      <article class="client-card client-${escapeHtml(info.tone)} is-${cardState}">
         <div class="client-card-header">
           <div class="client-icon"><i class="bi ${escapeHtml(info.icon)}" aria-hidden="true"></i></div>
           <div>
             <h3>${escapeHtml(info.title)}</h3>
             <p>${escapeHtml(client.hint || "")}</p>
           </div>
+          <span class="client-power ${client.enabled || external ? "on" : "off"}" aria-hidden="true"></span>
         </div>
         <div class="client-status-line">
           <span class="status ${statusClass}">${statusLabel}</span>
           <span class="status neutral">${composeLabel}</span>
+          ${service ? `<span class="status neutral">${escapeHtml(service)}</span>` : ""}
         </div>
         <dl class="client-settings">
           ${info.steps.map(([label, value]) => `
@@ -708,16 +761,23 @@ async function loadClients() {
             </div>
           `).join("")}
         </dl>
-        <pre class="client-command">${escapeHtml(info.command)}</pre>
-        <div class="client-actions">${action}</div>
+        <div class="client-command-block">
+          <span>${client.enabled ? "Stop command" : "Start command"}</span>
+          <pre class="client-command">${escapeHtml(command)}</pre>
+        </div>
+        <div class="client-actions">
+          ${primaryAction}
+          ${logsAction}
+        </div>
       </article>
     `;
   }).join(""));
 }
 
-async function enableClient(client) {
-  const result = await api(`/clients/${encodeURIComponent(client)}/enable`, { method: "POST" });
-  showCommandOutput(`enable ${client}`, result.result || result);
+async function setClientEnabled(client, enabled) {
+  const action = enabled ? "enable" : "disable";
+  const result = await api(`/clients/${encodeURIComponent(client)}/${action}`, { method: "POST" });
+  showCommandOutput(`${action} ${client}`, result.result || result, "#clients-output");
   if (result.ok === false || (result.result && result.result.returncode !== 0)) {
     throw new Error((result.result?.stderr || result.result?.stdout || result.enable?.stderr || "Client command failed").trim());
   }
@@ -931,8 +991,17 @@ function handleAction(button) {
       "Download started",
     );
   }
+  if (action === "client-copy-base") {
+    return runAction(button, () => copyText(state.clientsBaseUrl || `${window.location.origin}/v1`), "Base URL copied");
+  }
   if (action === "client-enable") {
-    return runAction(button, () => enableClient(button.dataset.client), "Client command finished");
+    return runAction(button, () => setClientEnabled(button.dataset.client, true), "Client enabled");
+  }
+  if (action === "client-disable") {
+    return runAction(button, () => setClientEnabled(button.dataset.client, false), "Client disabled");
+  }
+  if (action === "client-logs") {
+    return runAction(button, () => openContainerLogs(button.dataset.service));
   }
   if (action === "save-settings-restart") {
     return runAction(button, () => saveSettings(true), "Settings saved");

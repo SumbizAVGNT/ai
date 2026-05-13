@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/darkly/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="static/style.css?v=8">
+  <link rel="stylesheet" href="static/style.css?v=9">
 </head>
 <body>
   <div id="toast-container" class="toast-container"></div>
@@ -303,21 +303,36 @@
         <div class="clients-hero">
           <div>
             <p class="eyebrow">Client setup</p>
-            <h2>Connect tools to the local `/v1` endpoint</h2>
-            <p>Pick a client, enable its helper container when needed, then use a token from the Tokens tab as the API key.</p>
+            <h2>Client control center</h2>
+            <p>Local helper containers and external OpenAI-compatible providers.</p>
           </div>
-          <a class="btn btn-secondary" href="#" data-tab="tokens">
-            <i class="bi bi-key" aria-hidden="true"></i>
-            Manage Tokens
-          </a>
+          <div class="clients-hero-actions">
+            <button class="btn btn-secondary" data-action="load-clients">
+              <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+              Reload
+            </button>
+            <a class="btn btn-primary" href="#" data-tab="tokens">
+              <i class="bi bi-key" aria-hidden="true"></i>
+              Tokens
+            </a>
+          </div>
         </div>
+
+        <div id="clients-summary" class="clients-summary"></div>
 
         <div class="card clients-card">
           <div class="card-header">
-            <h2 class="card-title">Clients</h2>
-            <button class="btn btn-secondary btn-small" data-action="load-clients">Reload</button>
+            <div>
+              <h2 class="card-title">Client Integrations</h2>
+              <p class="card-subtitle">Enable, disable and inspect each connector.</p>
+            </div>
+            <button class="btn btn-secondary btn-small" data-action="client-copy-base">
+              <i class="bi bi-copy" aria-hidden="true"></i>
+              Copy Base URL
+            </button>
           </div>
           <div id="clients-list" class="clients-grid"></div>
+          <pre id="clients-output" class="logs-output hidden"></pre>
         </div>
       </section>
 
@@ -385,6 +400,6 @@
     </main>
   </section>
 
-  <script src="static/app.js?v=8"></script>
+  <script src="static/app.js?v=9"></script>
 </body>
 </html>

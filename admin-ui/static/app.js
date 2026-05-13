@@ -1,5 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+const toastKinds = { good: "success", bad: "error", warn: "warning", info: "info" };
+const badgeKinds = { good: "success", bad: "danger", warn: "warning", info: "info" };
 
 const APP_BASE = window.location.pathname === "/ui" || window.location.pathname.startsWith("/ui/")
   ? "/ui"
@@ -78,19 +80,46 @@ function errorText(error) {
   return error.message || JSON.stringify(error);
 }
 
+function setText(selector, value) {
+  const el = $(selector);
+  if (el) el.textContent = value;
+  return el;
+}
+
+function setHtml(selector, value) {
+  const el = $(selector);
+  if (el) el.innerHTML = value;
+  return el;
+}
+
+function bind(selector, eventName, handler) {
+  const el = $(selector);
+  if (el) el.addEventListener(eventName, handler);
+}
+
+function appVisible() {
+  const app = $("#app-view");
+  return Boolean(app && !app.classList.contains("hidden"));
+}
+
 function toast(message, kind = "info", timeout = 6000) {
-  const el = $("#toast");
-  el.className = `toast ${kind}`;
+  const container = $("#toast-container");
+  if (!container) return;
+  const el = document.createElement("div");
+  el.className = `toast ${toastKinds[kind] || kind || "info"}`;
   el.textContent = message;
-  el.classList.remove("hidden");
+  container.appendChild(el);
   if (timeout) {
-    window.clearTimeout(toast.timer);
-    toast.timer = window.setTimeout(() => el.classList.add("hidden"), timeout);
+    window.setTimeout(() => {
+      el.classList.add("is-hiding");
+      window.setTimeout(() => el.remove(), 180);
+    }, timeout);
   }
 }
 
 function pageError(message) {
   const el = $("#page-alert");
+  if (!el) return;
   if (!message) {
     el.classList.add("hidden");
     el.textContent = "";
@@ -101,13 +130,13 @@ function pageError(message) {
 }
 
 function showLogin() {
-  $("#login-view").classList.remove("hidden");
-  $("#app-view").classList.add("hidden");
+  $("#login-view")?.classList.remove("hidden");
+  $("#app-view")?.classList.add("hidden");
 }
 
 function showApp() {
-  $("#login-view").classList.add("hidden");
-  $("#app-view").classList.remove("hidden");
+  $("#login-view")?.classList.add("hidden");
+  $("#app-view")?.classList.remove("hidden");
 }
 
 async function parseResponse(response) {
@@ -150,11 +179,11 @@ async function api(path, options = {}) {
 }
 
 async function runAction(button, task, successMessage) {
-  const label = button?.textContent;
+  const label = button?.innerHTML;
   if (button) {
     button.disabled = true;
     button.dataset.busy = "true";
-    button.textContent = "Working...";
+    button.innerHTML = `<span class="spinner spinner-inline" aria-hidden="true"></span>Working...`;
   }
   pageError("");
   try {
@@ -170,17 +199,18 @@ async function runAction(button, task, successMessage) {
     if (button) {
       button.disabled = false;
       delete button.dataset.busy;
-      button.textContent = label;
+      button.innerHTML = label;
     }
   }
 }
 
 function renderEmpty(target, message) {
-  $(target).innerHTML = `<div class="empty">${escapeHtml(message)}</div>`;
+  setHtml(target, `<div class="empty">${escapeHtml(message)}</div>`);
 }
 
 function showCommandOutput(title, result) {
   const box = $("#command-output");
+  if (!box) return;
   const stdout = result?.stdout || "";
   const stderr = result?.stderr || "";
   const code = result?.returncode ?? "";
@@ -191,11 +221,13 @@ function showCommandOutput(title, result) {
 function setActiveTab(tab) {
   state.tab = tab;
   if (tab !== "logs") stopLogsFollow();
-  $$(".nav").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
+  $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
   $$(".tab-panel").forEach((panel) => panel.classList.add("hidden"));
-  $(`#tab-${tab}`).classList.remove("hidden");
-  $("#page-title").textContent = $(`.nav[data-tab="${tab}"]`)?.textContent.trim() || tab;
-  $("#page-subtitle").textContent = subtitles[tab] || "";
+  const panel = $(`#tab-${tab}`);
+  if (!panel) return;
+  panel.classList.remove("hidden");
+  setText("#page-title", $(`.nav-item[data-tab="${tab}"]`)?.textContent.trim() || tab);
+  setText("#page-subtitle", subtitles[tab] || "");
   pageError("");
   loadCurrentTab();
 }
@@ -216,7 +248,8 @@ async function loadCurrentTab() {
 }
 
 async function login() {
-  $("#login-error").textContent = "";
+  const loginError = setText("#login-error", "");
+  loginError?.classList.add("hidden");
   await api("/login", {
     method: "POST",
     body: JSON.stringify({
@@ -236,7 +269,10 @@ async function logout() {
 async function boot() {
   try {
     state.me = await api("/me");
-    $("#user-pill").textContent = state.me.username || "admin";
+    const username = state.me.username || "admin";
+    setText("#user-pill", username);
+    setText("#user-avatar", username.slice(0, 1).toUpperCase());
+    setText("#user-role", state.me.is_admin ? "Admin session" : "User session");
     showApp();
     setActiveTab(state.tab || "overview");
     loadUpdate(false).catch(() => {});
@@ -253,19 +289,19 @@ async function loadSystem() {
   const metrics = data.llama_metrics || {};
   const stack = data.stack || {};
 
-  $("#metric-cpu").textContent = `${Math.round(Number(host.cpu_percent || 0))}%`;
-  $("#metric-ram").textContent = formatBytePair(memory.used, memory.total);
-  $("#metric-disk").textContent = formatBytePair(disk.used, disk.total);
-  $("#metric-speed").textContent = metrics.avg_prompt_tokens_per_second
+  setText("#metric-cpu", `${Math.round(Number(host.cpu_percent || 0))}%`);
+  setText("#metric-ram", formatBytePair(memory.used, memory.total));
+  setText("#metric-disk", formatBytePair(disk.used, disk.total));
+  setText("#metric-speed", metrics.avg_prompt_tokens_per_second
     ? `${Number(metrics.avg_prompt_tokens_per_second).toFixed(1)} tok/s`
-    : "-";
-  $("#metric-eval-speed").textContent = metrics.avg_eval_tokens_per_second
+    : "-");
+  setText("#metric-eval-speed", metrics.avg_eval_tokens_per_second
     ? `${Number(metrics.avg_eval_tokens_per_second).toFixed(1)} tok/s`
-    : "-";
-  $("#metric-uptime").textContent = formatDuration(host.uptime_seconds);
-  $("#hero-backend").textContent = `backend: ${shortValue(stack.backend, "cpu")}`;
-  $("#hero-model").textContent = `model: ${shortValue(stack.model_id || stack.model_path, "not selected")}`;
-  $("#hero-url").textContent = `url: ${shortValue(stack.public_base_url, window.location.origin)}`;
+    : "-");
+  setText("#metric-uptime", formatDuration(host.uptime_seconds));
+  setText("#hero-backend", `backend: ${shortValue(stack.backend, "cpu")}`);
+  setText("#hero-model", `model: ${shortValue(stack.model_id || stack.model_path, "not selected")}`);
+  setText("#hero-url", `url: ${shortValue(stack.public_base_url, window.location.origin)}`);
 
   const preferred = [
     "llama-server-coder",
@@ -289,7 +325,7 @@ async function loadSystem() {
     return;
   }
 
-  $("#containers-list").innerHTML = containers.map((container) => {
+  setHtml("#containers-list", containers.map((container) => {
     const running = container.status === "running";
     const health = container.health || "";
     const healthBad = health === "unhealthy";
@@ -316,7 +352,7 @@ async function loadSystem() {
         </div>
       </div>
     `;
-  }).join("");
+  }).join(""));
 }
 
 async function stackAction(action) {
@@ -573,29 +609,110 @@ async function loadModelJobs(show = true) {
 }
 
 async function loadClients() {
-  const data = await api("/clients");
-  $("#clients-list").innerHTML = Object.entries(data).map(([name, client]) => {
+  const [data, settings] = await Promise.all([
+    api("/clients"),
+    api("/settings").catch(() => ({})),
+  ]);
+  const baseUrl = String(settings.public_base_url || window.location.origin).replace(/\/$/, "");
+  const modelName = settings.model_path ? settings.model_path.split("/").pop() : "active GGUF model";
+  const meta = {
+    opencode: {
+      title: "OpenCode Desktop",
+      icon: "bi-code-slash",
+      tone: "recommended",
+      command: "docker compose --profile tools up -d opencode-server",
+      steps: [
+        ["Provider", "OpenAI Compatible"],
+        ["Base URL", `${baseUrl}/v1`],
+        ["API key", "Token from Tokens tab"],
+        ["Model", modelName],
+      ],
+    },
+    codex: {
+      title: "Codex Runner",
+      icon: "bi-terminal",
+      tone: "tools",
+      command: "docker compose --profile tools run --rm codex-runner",
+      steps: [
+        ["OPENAI_BASE_URL", `${baseUrl}/v1`],
+        ["OPENAI_API_KEY", "Token from Tokens tab"],
+        ["Model", modelName],
+      ],
+    },
+    claude: {
+      title: "Claude Code Proxy",
+      icon: "bi-bezier2",
+      tone: "experimental",
+      command: "docker compose --profile claude up -d claude-code-proxy",
+      steps: [
+        ["Status", "Experimental local proxy"],
+        ["Base URL", `${baseUrl}/v1`],
+        ["API key", "Token from Tokens tab"],
+      ],
+    },
+    openrouter: {
+      title: "OpenRouter",
+      icon: "bi-cloud-arrow-up",
+      tone: "external",
+      command: "No local container is required.",
+      steps: [
+        ["Base URL", "https://openrouter.ai/api/v1"],
+        ["API key", "OpenRouter key"],
+        ["Use case", "External fallback provider"],
+      ],
+    },
+  };
+
+  const entries = Object.entries(data);
+  if (!entries.length) {
+    renderEmpty("#clients-list", "No clients are configured.");
+    return;
+  }
+
+  setHtml("#clients-list", entries.map(([name, client]) => {
+    const info = meta[name] || {
+      title: name,
+      icon: "bi-box",
+      tone: "tools",
+      command: "",
+      steps: [["Base URL", `${baseUrl}/v1`]],
+    };
     const external = Boolean(client.external);
     const statusClass = external || client.enabled ? "good" : "bad";
     const statusLabel = external ? "external" : (client.enabled ? "running" : "off");
-    const composeLabel = external ? "no local proxy" : (client.defined ? "defined" : "missing in compose");
+    const composeLabel = external ? "external service" : (client.defined ? "compose ready" : "compose missing");
     const action = external
-      ? `<span class="muted small">No action</span>`
-      : `<button class="secondary small" data-action="client-enable" data-client="${escapeHtml(name)}" ${client.enabled ? "disabled" : ""}>
+      ? `<span class="status good">No local action</span>`
+      : `<button class="btn btn-primary btn-small" data-action="client-enable" data-client="${escapeHtml(name)}" ${client.enabled ? "disabled" : ""}>
+          <i class="bi bi-play-fill" aria-hidden="true"></i>
           ${client.enabled ? "Enabled" : "Enable"}
         </button>`;
     return `
-      <div class="list-row client-row">
-        <div>
-          <strong>${escapeHtml(name)}</strong>
-          <small>${escapeHtml(client.hint || "")}</small>
+      <article class="client-card client-${escapeHtml(info.tone)}">
+        <div class="client-card-header">
+          <div class="client-icon"><i class="bi ${escapeHtml(info.icon)}" aria-hidden="true"></i></div>
+          <div>
+            <h3>${escapeHtml(info.title)}</h3>
+            <p>${escapeHtml(client.hint || "")}</p>
+          </div>
         </div>
-        <span class="status ${statusClass}">${statusLabel}</span>
-        <span>${composeLabel}</span>
-        ${action}
-      </div>
+        <div class="client-status-line">
+          <span class="status ${statusClass}">${statusLabel}</span>
+          <span class="status neutral">${composeLabel}</span>
+        </div>
+        <dl class="client-settings">
+          ${info.steps.map(([label, value]) => `
+            <div>
+              <dt>${escapeHtml(label)}</dt>
+              <dd>${escapeHtml(value)}</dd>
+            </div>
+          `).join("")}
+        </dl>
+        <pre class="client-command">${escapeHtml(info.command)}</pre>
+        <div class="client-actions">${action}</div>
+      </article>
     `;
-  }).join("");
+  }).join(""));
 }
 
 async function enableClient(client) {
@@ -605,6 +722,19 @@ async function enableClient(client) {
     throw new Error((result.result?.stderr || result.result?.stdout || result.enable?.stderr || "Client command failed").trim());
   }
   await loadClients();
+}
+
+function toggleUserInfo(button) {
+  const panel = $("#sidebar-user-info");
+  const icon = button?.querySelector(".toggle-icon");
+  if (!panel) return;
+  const collapsed = panel.classList.toggle("is-collapsed");
+  panel.classList.toggle("is-open", !collapsed);
+  button?.setAttribute("aria-expanded", String(!collapsed));
+  if (icon) {
+    icon.classList.toggle("bi-chevron-up", !collapsed);
+    icon.classList.toggle("bi-chevron-down", collapsed);
+  }
 }
 
 function stopLogsFollow() {
@@ -634,13 +764,14 @@ async function loadLogs(options = {}) {
   const service = $("#log-service").value;
   const data = await api(`/logs/${encodeURIComponent(service)}?tail=300`);
   state.lastLogsText = (data.stdout || "") + (data.stderr || "") || "No logs.";
-  $("#logs-output").textContent = applyLogFilter(state.lastLogsText);
+  setText("#logs-output", applyLogFilter(state.lastLogsText));
   if (!options.silent) syncLogsFollow();
 }
 
 function setUpdateState(kind, label) {
   const badge = $("#update-state");
-  badge.className = `status ${kind || ""}`.trim();
+  if (!badge) return;
+  badge.className = `badge badge-${badgeKinds[kind] || kind || "info"}`;
   badge.textContent = label;
 }
 
@@ -747,6 +878,10 @@ function handleAction(button) {
     "stack-status": "status",
   };
 
+  if (action === "toggle-user-info") {
+    toggleUserInfo(button);
+    return undefined;
+  }
   if (action === "refresh") return runAction(button, loadCurrentTab, "Refreshed");
   if (action === "logout") return runAction(button, logout);
   if (action === "load-system") return runAction(button, loadSystem, "Containers reloaded");
@@ -819,24 +954,25 @@ document.addEventListener("click", (event) => {
   handleAction(button)?.catch(() => {});
 });
 
-$("#login-form").addEventListener("submit", (event) => {
+bind("#login-form", "submit", (event) => {
   event.preventDefault();
   runAction($("#login-form button[type='submit']"), login).catch((error) => {
-    $("#login-error").textContent = errorText(error);
+    const loginError = setText("#login-error", errorText(error));
+    loginError?.classList.remove("hidden");
   });
 });
 
-$("#token-form").addEventListener("submit", (event) => {
+bind("#token-form", "submit", (event) => {
   event.preventDefault();
   runAction($("#token-form button[type='submit']"), createToken, "Token created").catch(() => {});
 });
 
-$("#user-form").addEventListener("submit", (event) => {
+bind("#user-form", "submit", (event) => {
   event.preventDefault();
   runAction($("#user-form button[type='submit']"), createUser, "User created").catch(() => {});
 });
 
-$("#hf-form").addEventListener("submit", (event) => {
+bind("#hf-form", "submit", (event) => {
   event.preventDefault();
   const repo = $("#hf-repo").value.trim();
   const include = $("#hf-include").value.trim() || "*.gguf";
@@ -844,40 +980,40 @@ $("#hf-form").addEventListener("submit", (event) => {
   runAction($("#hf-form button[type='submit']"), () => downloadModel(repo, include, localDir), "Download started").catch(() => {});
 });
 
-$("#settings-form").addEventListener("submit", (event) => {
+bind("#settings-form", "submit", (event) => {
   event.preventDefault();
   runAction($("#settings-form button[type='submit']"), () => saveSettings(false), "Settings saved").catch(() => {});
 });
 
-$("#logs-form").addEventListener("submit", (event) => {
+bind("#logs-form", "submit", (event) => {
   event.preventDefault();
   runAction($("#logs-form button[type='submit']"), loadLogs, "Logs loaded").catch(() => {});
 });
 
-$("#log-filter").addEventListener("input", () => {
-  $("#logs-output").textContent = applyLogFilter(state.lastLogsText);
+bind("#log-filter", "input", () => {
+  setText("#logs-output", applyLogFilter(state.lastLogsText));
 });
 
-$("#logs-follow").addEventListener("change", syncLogsFollow);
+bind("#logs-follow", "change", syncLogsFollow);
 
 window.addEventListener("unhandledrejection", (event) => {
   pageError(errorText(event.reason));
 });
 
 window.setInterval(() => {
-  if (!$("#app-view").classList.contains("hidden") && state.tab === "overview") {
+  if (appVisible() && state.tab === "overview") {
     loadSystem().catch(() => {});
   }
 }, 7000);
 
 window.setInterval(() => {
-  if (!$("#app-view").classList.contains("hidden")) {
+  if (appVisible()) {
     loadUpdate(false).catch(() => {});
   }
 }, 300000);
 
 window.setInterval(() => {
-  if (!$("#app-view").classList.contains("hidden") && state.tab === "models") {
+  if (appVisible() && state.tab === "models") {
     loadModelJobs(false).catch(() => {});
   }
 }, 5000);

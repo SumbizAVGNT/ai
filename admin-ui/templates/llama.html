@@ -1,12 +1,58 @@
-{% extends "base.html" %}{% block title %}Llama Settings{% endblock %}{% block content %}
-{% if message %}<div class="msg">{{ message }}</div>{% endif %}
-<div class="card full"><form method="post" action="{{ base }}/llama" class="formgrid">
-<div class="field"><label>Context -c</label><input name="ctx_size" value="{{ env.CTX_SIZE or '32768' }}"></div>
-<div class="field"><label>Threads -t</label><input name="threads" value="{{ env.THREADS or '16' }}"></div>
-<div class="field"><label>Parallel slots -np</label><input name="parallel_slots" value="{{ env.PARALLEL_SLOTS or '1' }}"></div>
-<div class="field"><label>GPU layers --n-gpu-layers</label><input name="n_gpu_layers" value="{{ env.N_GPU_LAYERS or '0' }}"></div>
-<div class="field"><label>Timeout</label><input name="llama_timeout" value="{{ env.LLAMA_TIMEOUT or '1200' }}"></div>
-<div class="field"><label>Extra args</label><input name="llama_extra_args" value="{{ env.LLAMA_EXTRA_ARGS or '' }}" placeholder="--flash-attn on"></div>
-<label class="pill"><input type="checkbox" name="restart" style="width:auto" checked> Restart llama after save</label><div><button class="btn">Save settings</button></div>
-</form><p class="muted">Settings are stored in config/llama.env. Model path should normally be /models/current.gguf for dynamic switching.</p></div>
+{% extends "base.html" %}
+{% block title %}Llama Settings{% endblock %}
+{% block content %}
+<div class="container-fluid">
+    {% if message %}
+    <div class="alert alert-info"><i class="fas fa-info-circle"></i> {{ message }}</div>
+    {% endif %}
+    
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header bg-dark">
+                    <h5 class="card-title mb-0"><i class="fas fa-cog"></i> Llama Server Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post" action="{{ base }}/llama">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Context Size (-c)</label>
+                                <input name="ctx_size" class="form-control" value="{{ env.CTX_SIZE or '32768' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Threads (-t)</label>
+                                <input name="threads" class="form-control" value="{{ env.THREADS or '16' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Parallel Slots (-np)</label>
+                                <input name="parallel_slots" class="form-control" value="{{ env.PARALLEL_SLOTS or '1' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">GPU Layers (--n-gpu-layers)</label>
+                                <input name="n_gpu_layers" class="form-control" value="{{ env.N_GPU_LAYERS or '0' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Timeout (seconds)</label>
+                                <input name="llama_timeout" class="form-control" value="{{ env.LLAMA_TIMEOUT or '1200' }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Extra Args</label>
+                                <input name="llama_extra_args" class="form-control" value="{{ env.LLAMA_EXTRA_ARGS or '' }}" placeholder="--flash-attn on">
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="form-check mb-3">
+                            <input type="checkbox" name="restart" class="form-check-input" id="restartCheck" checked>
+                            <label class="form-check-label" for="restartCheck">Restart llama after save</label>
+                        </div>
+                        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Settings</button>
+                    </form>
+                </div>
+                <div class="card-footer text-muted small">
+                    <i class="fas fa-info-circle"></i> Settings are stored in config/llama.env. Model path should normally be /models/current.gguf for dynamic switching.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}

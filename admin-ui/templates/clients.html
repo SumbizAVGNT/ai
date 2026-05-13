@@ -1,11 +1,110 @@
-{% extends "base.html" %}{% block title %}Clients{% endblock %}{% block content %}
-<div class="grid">
- <div class="card"><h2>OpenCode</h2><p class="muted">Лучший клиент для этого стека. Если контейнер не создан, включи его командой ниже.</p><div class="pre">docker compose --profile tools up -d opencode-server</div><p>Desktop server: <code>http://localhost:4096</code><br>user/pass: <code>opencode/opencode</code></p></div>
- <div class="card"><h2>Claude Code proxy</h2><p class="muted">Экспериментально. Tools часто конфликтуют с llama.cpp grammar, поэтому лучше использовать OpenCode.</p><div class="pre">docker compose --profile claude up -d claude-code-proxy</div></div>
- <div class="card"><h2>Codex</h2><p class="muted">Требует OpenAI account/API key. Helper-контейнер можно включить отдельно.</p><div class="pre">docker compose --profile tools run --rm codex-runner</div></div>
- <div class="card full"><h2>Provider settings</h2><div class="pre">Provider: OpenAI Compatible
-Base URL: {{ public_base_url }}/v1
-API Key: create one on Tokens page
-Model: active GGUF filename</div></div>
+{% extends "base.html" %}
+{% block title %}Clients{% endblock %}
+{% block content %}
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i>
+                Configure your AI clients to work with the local API endpoint. Create tokens on the Tokens page first.
+            </div>
+        </div>
+    </div>
+    
+    <div class="row g-4">
+        <!-- OpenCode Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="fas fa-code"></i> OpenCode</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Лучший клиент для этого стека. Если контейнер не создан, включи его командой ниже.</p>
+                    <div class="bg-dark p-3 rounded mb-3">
+                        <code class="text-success">docker compose --profile tools up -d opencode-server</code>
+                    </div>
+                    <hr>
+                    <p class="mb-2"><strong>Desktop server:</strong> <code class="text-info">http://localhost:4096</code></p>
+                    <p class="mb-0"><strong>Credentials:</strong> <code class="text-warning">opencode/opencode</code></p>
+                </div>
+                <div class="card-footer">
+                    <span class="badge bg-success">Recommended</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Claude Code Proxy Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="fas fa-robot"></i> Claude Code Proxy</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Экспериментально. Tools часто конфликтуют с llama.cpp grammar, поэтому лучше использовать OpenCode.</p>
+                    <div class="bg-dark p-3 rounded mb-3">
+                        <code class="text-success">docker compose --profile claude up -d claude-code-proxy</code>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <span class="badge bg-warning text-dark">Experimental</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Codex Card -->
+        <div class="col-md-6 col-lg-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="fas fa-terminal"></i> Codex</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Требует OpenAI account/API key. Helper-контейнер можно включить отдельно.</p>
+                    <div class="bg-dark p-3 rounded mb-3">
+                        <code class="text-success">docker compose --profile tools run --rm codex-runner</code>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <span class="badge bg-info">OpenAI Compatible</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Provider Settings Card -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0"><i class="fas fa-cog"></i> Provider Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <div class="p-3 bg-dark rounded">
+                                <label class="text-muted small">Provider</label>
+                                <p class="mb-0 text-white"><strong>OpenAI Compatible</strong></p>
+                            </div>
+                        </div>
+                        <div class="col-md-9">
+                            <div class="p-3 bg-dark rounded">
+                                <label class="text-muted small">Base URL</label>
+                                <p class="mb-0 text-info"><code>{{ public_base_url }}/v1</code></p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="p-3 bg-dark rounded">
+                                <label class="text-muted small">API Key</label>
+                                <p class="mb-0 text-warning">Create one on <a href="{{ base }}/tokens" class="text-warning">Tokens page</a></p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="p-3 bg-dark rounded">
+                                <label class="text-muted small">Model</label>
+                                <p class="mb-0 text-success">Active GGUF filename from <a href="{{ base }}/models" class="text-success">Models page</a></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

@@ -1,3 +1,40 @@
-{% extends "base.html" %}{% block title %}Logs{% endblock %}{% block content %}
-<div class="card full"><form method="get" action="{{ base }}/logs" class="formgrid"><div class="field"><label>Service</label><select name="service"><option {% if service=='token-gateway' %}selected{% endif %}>token-gateway</option><option {% if service=='llama-server-coder' %}selected{% endif %}>llama-server-coder</option><option {% if service=='local-ai-nginx' %}selected{% endif %}>local-ai-nginx</option><option {% if service=='admin-ui' %}selected{% endif %}>admin-ui</option><option {% if service=='postgres' %}selected{% endif %}>postgres</option></select></div><div class="field"><label>Tail</label><input name="tail" value="{{ tail }}"></div><div style="align-self:end"><button class="btn">Refresh</button></div></form><br><div class="pre">{{ logs }}</div></div>
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-dark">
+                    <h5 class="card-title mb-0"><i class="fas fa-scroll"></i> Service Logs</h5>
+                </div>
+                <div class="card-body">
+                    <form method="get" action="{{ base }}/logs" class="row g-3 align-items-end mb-4">
+                        <div class="col-md-4">
+                            <label class="form-label">Service</label>
+                            <select name="service" class="form-select">
+                                <option {% if service=='token-gateway' %}selected{% endif %}>token-gateway</option>
+                                <option {% if service=='llama-server-coder' %}selected{% endif %}>llama-server-coder</option>
+                                <option {% if service=='local-ai-nginx' %}selected{% endif %}>local-ai-nginx</option>
+                                <option {% if service=='admin-ui' %}selected{% endif %}>admin-ui</option>
+                                <option {% if service=='postgres' %}selected{% endif %}>postgres</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Tail Lines</label>
+                            <input name="tail" class="form-control" value="{{ tail }}" placeholder="300">
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100"><i class="fas fa-sync-alt"></i> Refresh</button>
+                        </div>
+                    </form>
+                    
+                    <div class="bg-dark rounded p-3">
+                        <pre class="text-light mb-0" style="white-space: pre-wrap; word-break: break-all; max-height: 600px; overflow-y: auto;">{{ logs }}</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}

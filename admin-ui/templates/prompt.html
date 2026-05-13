@@ -1,4 +1,35 @@
-{% extends "base.html" %}{% block title %}System Prompt{% endblock %}{% block content %}
-{% if message %}<div class="msg">{{ message }}</div>{% endif %}
-<div class="card full"><h2>Gateway prompt injection</h2><p class="muted">Этот prompt автоматически добавляется в /v1/chat/completions, чтобы модель не просила подтверждение и отвечала сразу.</p><form method="post" action="{{ base }}/prompt"><label class="pill"><input type="checkbox" name="inject_system_prompt_enabled" style="width:auto" {% if config.inject_system_prompt_enabled %}checked{% endif %}> Включено</label><br><br><textarea name="system_prompt">{{ config.system_prompt }}</textarea><br><br><button class="btn">Сохранить</button></form></div>
+{% extends "base.html" %}
+{% block title %}Prompt{% endblock %}
+{% block content %}
+<div class="container-fluid">
+    {% if message %}
+    <div class="alert alert-info"><i class="fas fa-info-circle"></i> {{ message }}</div>
+    {% endif %}
+    
+    <div class="row">
+        <div class="col-lg-10">
+            <div class="card">
+                <div class="card-header bg-dark">
+                    <h5 class="card-title mb-0"><i class="fas fa-comment-dots"></i> Gateway Prompt Injection</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-4">
+                        Этот prompt автоматически добавляется в /v1/chat/completions, чтобы модель не просила подтверждение и отвечала сразу.
+                    </p>
+                    <form method="post" action="{{ base }}/prompt">
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" name="inject_system_prompt_enabled" class="form-check-input" id="injectCheck" {% if config.inject_system_prompt_enabled %}checked{% endif %}>
+                            <label class="form-check-label" for="injectCheck">Включено (Enabled)</label>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">System Prompt</label>
+                            <textarea name="system_prompt" class="form-control" rows="8">{{ config.system_prompt }}</textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Сохранить (Save)</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}

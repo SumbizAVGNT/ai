@@ -1,4 +1,96 @@
-{% extends "base.html" %}{% block title %}Tokens{% endblock %}{% block content %}
-{% if message %}<div class="msg">{{ message }}</div>{% endif %}
-<div class="grid"><div class="card full"><h2>Создать токен</h2><form method="post" action="{{ base }}/tokens/create" class="formgrid"><div class="field"><label>Имя</label><input name="name" required></div><div class="field"><label>Лимит токенов</label><input name="limit_tokens" placeholder="100000"></div><label class="pill"><input type="checkbox" name="unlimited" checked style="width:auto"> Безлимит</label><div><button class="btn">Создать</button></div></form></div><div class="card full"><h2>Список токенов</h2><table class="table"><tr><th>Name</th><th>Key</th><th>Used</th><th>Limit</th><th>Remaining</th><th>On</th><th>Actions</th></tr>{% for t in tokens %}<tr><form method="post" action="{{ base }}/tokens/{{ t.key }}/update"><td><input name="name" value="{{ t.name }}"></td><td><code>{{ t.key }}</code></td><td>{{ t.used_tokens }}</td><td><input name="limit_tokens" value="{{ t.limit_tokens or '' }}" style="width:120px"></td><td>{{ '∞' if t.unlimited else t.remaining_tokens }}</td><td><input type="checkbox" name="enabled" {% if t.enabled %}checked{% endif %}> <input type="checkbox" name="unlimited" {% if t.unlimited %}checked{% endif %}>∞</td><td><div class="row-actions"><button class="btn secondary">Save</button></form><form method="post" action="{{ base }}/tokens/{{ t.key }}/reset"><button class="btn secondary">Reset</button></form><form method="post" action="{{ base }}/tokens/{{ t.key }}/delete"><button class="btn danger">Delete</button></form></div></td></tr>{% endfor %}</table></div></div>
+{% extends "base.html" %}
+{% block title %}Tokens{% endblock %}
+{% block content %}
+<div class="container-fluid">
+    {% if message %}
+    <div class="alert alert-info"><i class="fas fa-info-circle"></i> {{ message }}</div>
+    {% endif %}
+    
+    <div class="row g-4">
+        <!-- Create Token Form -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header bg-dark">
+                    <h5 class="card-title mb-0"><i class="fas fa-plus-circle"></i> Create Token</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post" action="{{ base }}/tokens/create">
+                        <div class="mb-3">
+                            <label class="form-label">Name</label>
+                            <input name="name" class="form-control" required placeholder="my-token">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Token Limit</label>
+                            <input name="limit_tokens" class="form-control" placeholder="100000">
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" name="unlimited" class="form-check-input" id="unlimitedCheck" checked>
+                            <label class="form-check-label" for="unlimitedCheck">Unlimited</label>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100"><i class="fas fa-plus"></i> Create</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Tokens Table -->
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header bg-dark">
+                    <h5 class="card-title mb-0"><i class="fas fa-key"></i> Token List</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Key</th>
+                                    <th>Used</th>
+                                    <th>Limit</th>
+                                    <th>Remaining</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for t in tokens %}
+                                <tr>
+                                    <form method="post" action="{{ base }}/tokens/{{ t.key }}/update">
+                                        <td><input name="name" class="form-control form-control-sm" value="{{ t.name }}"></td>
+                                        <td><code>{{ t.key }}</code></td>
+                                        <td>{{ t.used_tokens }}</td>
+                                        <td><input name="limit_tokens" class="form-control form-control-sm" value="{{ t.limit_tokens or '' }}" style="width:120px"></td>
+                                        <td>{% if t.unlimited %}∞{% else %}{{ t.remaining_tokens }}{% endif %}</td>
+                                        <td>
+                                            <div class="form-check form-switch">
+                                                <input type="checkbox" name="enabled" class="form-check-input" {% if t.enabled %}checked{% endif %}>
+                                            </div>
+                                            <div class="form-check form-switch">
+                                                <input type="checkbox" name="unlimited" class="form-check-input" {% if t.unlimited %}checked{% endif %}>
+                                                <label class="form-check-label small">∞</label>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                <button type="submit" class="btn btn-secondary"><i class="fas fa-save"></i></button>
+                                            </div>
+                                            <form method="post" action="{{ base }}/tokens/{{ t.key }}/reset" class="d-inline">
+                                                <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-redo"></i></button>
+                                            </form>
+                                            <form method="post" action="{{ base }}/tokens/{{ t.key }}/delete" class="d-inline" onsubmit="return confirm('Delete this token?')">
+                                                <button type="submit" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i></button>
+                                            </form>
+                                        </td>
+                                    </form>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}

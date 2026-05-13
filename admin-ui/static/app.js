@@ -16,6 +16,13 @@ const state = {
   logsTimer: null,
   lastLogsText: '',
   clientsBaseUrl: '',
+  chat: {
+    conversations: [],
+    activeId: null,
+    attachments: [],
+    status: null,
+    busy: false,
+  },
 };
 
 const TAB_TITLES = {
@@ -25,6 +32,7 @@ const TAB_TITLES = {
   tokens: 'Token Management',
   users: 'User Accounts',
   models: 'Model Library',
+  chat: 'AI Chat',
   settings: 'Llama / Prompt',
   clients: 'Client Integrations',
   logs: 'Container Logs',
@@ -37,10 +45,23 @@ const TAB_SUBTITLES = {
   tokens: 'API keys, limits and usage counters',
   users: 'Admin panel accounts management',
   models: 'Local GGUF models, downloads and uploads',
+  chat: 'Direct AI console with files, history and model controls',
   settings: 'Prompt and llama.cpp runtime configuration',
   clients: 'OpenAI-compatible client helpers',
   logs: 'Container logs with filter and follow mode',
 };
+
+const CHAT_STORAGE_KEY = 'localAiChatConversations';
+const CHAT_ACTIVE_KEY = 'localAiChatActiveId';
+const CHAT_SETTINGS_KEY = 'localAiChatSettings';
+const CHAT_MAX_FILE_CHARS = 60000;
+const CHAT_MAX_TOTAL_FILE_CHARS = 140000;
+const CHAT_TEXT_EXTENSIONS = new Set([
+  'txt', 'md', 'markdown', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'ini', 'env',
+  'py', 'js', 'jsx', 'ts', 'tsx', 'html', 'css', 'scss', 'sql', 'sh', 'bash',
+  'ps1', 'bat', 'cmd', 'dockerfile', 'log', 'csv', 'xml', 'rs', 'go', 'java',
+  'kt', 'cs', 'cpp', 'c', 'h', 'hpp', 'php', 'rb', 'swift',
+]);
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -78,6 +99,21 @@ const formatDuration = (seconds) => {
   if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+};
+
+const formatTime = (value) => {
+  const date = new Date(value || Date.now());
+  return date.toLocaleString([], { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+};
+
+const formatSpeed = (value) => {
+  const num = Number(value || 0);
+  return Number.isFinite(num) && num > 0 ? `${num.toFixed(1)} tok/s` : '-';
+};
+
+const makeId = () => {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 };
 
 const normalizeTab = (tab) => {
@@ -278,7 +314,7 @@ const syncGlobalSearch = () => {
   const q = ($('#global-search')?.value || '').trim().toLowerCase();
   const activePanel = $(`#tab-${state.tab}`);
   if (!activePanel) return;
-  activePanel.querySelectorAll('.list-row, .client-card, .catalog-card').forEach((el) => {
+  activePanel.querySelectorAll('.list-row, .client-card, .catalog-card, .chat-history-item, .chat-message').forEach((el) => {
     const hidden = Boolean(q) && !el.textContent.toLowerCase().includes(q);
     el.classList.toggle('is-search-hidden', hidden);
     el.style.display = hidden ? 'none' : '';
@@ -305,6 +341,9 @@ const loadCurrentTab = async (tab = state.tab) => {
       break;
     case 'models':
       await loadModels();
+      break;
+    case 'chat':
+      await loadChat();
       break;
     case 'settings':
       await loadSettings();
@@ -647,6 +686,341 @@ const loadClients = async () => {
   }).join(''));
 };
 
+const newChatConversation = () => ({
+  id: makeId(),
+  title: 'New chat',
+  messages: [],
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+});
+
+const loadChatStorage = () => {
+  let conversations = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CHAT_STORAGE_KEY) || '[]');
+    if (Array.isArray(parsed)) conversations = parsed;
+  } catch {
+    conversations = [];
+  }
+  if (!conversations.length) conversations = [newChatConversation()];
+  state.chat.conversations = conversations;
+  state.chat.activeId = localStorage.getItem(CHAT_ACTIVE_KEY) || conversations[0].id;
+  if (!state.chat.conversations.some((item) => item.id === state.chat.activeId)) {
+    state.chat.activeId = state.chat.conversations[0].id;
+  }
+};
+
+const saveChatStorage = () => {
+  localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(state.chat.conversations.slice(0, 40)));
+  if (state.chat.activeId) localStorage.setItem(CHAT_ACTIVE_KEY, state.chat.activeId);
+};
+
+const activeChat = () => state.chat.conversations.find((item) => item.id === state.chat.activeId) || null;
+
+const loadChatSettings = () => {
+  try {
+    const settings = JSON.parse(localStorage.getItem(CHAT_SETTINGS_KEY) || '{}');
+    if ($('#chat-temperature') && settings.temperature !== undefined) $('#chat-temperature').value = settings.temperature;
+    if ($('#chat-top-p') && settings.top_p !== undefined) $('#chat-top-p').value = settings.top_p;
+    if ($('#chat-max-tokens') && settings.max_tokens !== undefined) $('#chat-max-tokens').value = settings.max_tokens;
+    if ($('#chat-system') && settings.system !== undefined) $('#chat-system').value = settings.system;
+  } catch {
+    /* keep defaults */
+  }
+};
+
+const saveChatSettings = () => {
+  localStorage.setItem(CHAT_SETTINGS_KEY, JSON.stringify({
+    temperature: $('#chat-temperature')?.value || '',
+    top_p: $('#chat-top-p')?.value || '',
+    max_tokens: $('#chat-max-tokens')?.value || '',
+    system: $('#chat-system')?.value || '',
+  }));
+};
+
+const chatTitleFromText = (text) => {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  return clean ? clean.slice(0, 64) : 'File chat';
+};
+
+const renderChatHistory = () => {
+  setHtml('#chat-history', state.chat.conversations.map((conversation) => {
+    const active = conversation.id === state.chat.activeId;
+    const count = conversation.messages?.length || 0;
+    return `<button class="chat-history-item ${active ? 'active' : ''}" data-action="chat-open" data-id="${escapeHtml(conversation.id)}">
+      <strong>${escapeHtml(conversation.title || 'New chat')}</strong>
+      <span>${count} messages - ${escapeHtml(formatTime(conversation.updatedAt || conversation.createdAt))}</span>
+    </button>`;
+  }).join(''));
+};
+
+const messageStats = (message) => {
+  const stats = message.stats || {};
+  const pieces = [];
+  if (stats.elapsed_ms) pieces.push(`${(Number(stats.elapsed_ms) / 1000).toFixed(1)}s`);
+  if (stats.used_tokens) pieces.push(`${stats.used_tokens} tokens`);
+  const metrics = stats.metrics || {};
+  if (metrics.avg_prompt_tokens_per_second) pieces.push(`prompt ${formatSpeed(metrics.avg_prompt_tokens_per_second)}`);
+  if (metrics.avg_eval_tokens_per_second) pieces.push(`eval ${formatSpeed(metrics.avg_eval_tokens_per_second)}`);
+  return pieces;
+};
+
+const renderChatMessages = () => {
+  const conversation = activeChat();
+  if (!conversation || !conversation.messages.length) {
+    setHtml('#chat-messages', '<div class="chat-empty"><span>AI</span><strong>Ready</strong></div>');
+    setText('#chat-title', conversation?.title || 'New chat');
+    setText('#chat-subtitle', '0 messages');
+    return;
+  }
+
+  setText('#chat-title', conversation.title || 'New chat');
+  setText('#chat-subtitle', `${conversation.messages.length} messages`);
+  setHtml('#chat-messages', conversation.messages.map((message) => {
+    const role = escapeHtml(message.role || 'assistant');
+    const body = escapeHtml(message.displayContent || message.content || '');
+    const attachments = (message.attachments || []).map((file) => `<span>${escapeHtml(file.name)} - ${formatBytes(file.size)}</span>`);
+    const meta = [...attachments, ...messageStats(message).map(escapeHtml)];
+    return `<article class="chat-message ${role}">
+      <div class="chat-message-head"><span>${role}</span><span>${escapeHtml(formatTime(message.createdAt))}</span></div>
+      <div class="chat-message-body">${body}</div>
+      ${meta.length ? `<div class="chat-message-meta">${meta.map((item) => `<span>${item}</span>`).join('')}</div>` : ''}
+    </article>`;
+  }).join(''));
+  const messages = $('#chat-messages');
+  if (messages) messages.scrollTop = messages.scrollHeight;
+};
+
+const renderChatAttachments = () => {
+  if (!state.chat.attachments.length) {
+    setHtml('#chat-attachments', '');
+    return;
+  }
+  setHtml('#chat-attachments', state.chat.attachments.map((file) => `<span class="chat-file-chip">
+    <strong>${escapeHtml(file.name)}</strong>
+    ${formatBytes(file.size)}
+    ${file.truncated ? '<em>trimmed</em>' : ''}
+    <button type="button" data-action="chat-file-remove" data-id="${escapeHtml(file.id)}">x</button>
+  </span>`).join(''));
+};
+
+const renderChat = () => {
+  renderChatHistory();
+  renderChatMessages();
+  renderChatAttachments();
+};
+
+const applyChatMetrics = (metrics = {}) => {
+  setText('#chat-prompt-speed', `prompt: ${formatSpeed(metrics.avg_prompt_tokens_per_second)}`);
+  setText('#chat-eval-speed', `eval: ${formatSpeed(metrics.avg_eval_tokens_per_second)}`);
+};
+
+const loadChatStatus = async () => {
+  const status = await api('/chat/status');
+  state.chat.status = status;
+  const models = status.models || [];
+  const current = status.current_model_path || '';
+  const select = $('#chat-model-select');
+  if (select) {
+    const options = models.map((model) => `<option value="${escapeHtml(model.path)}">${escapeHtml(model.name)}</option>`);
+    if (current && !models.some((model) => model.path === current)) {
+      options.unshift(`<option value="${escapeHtml(current)}">${escapeHtml(status.current_model_name || current)}</option>`);
+    }
+    select.innerHTML = options.join('') || '<option value="">local-model</option>';
+    select.value = current || models[0]?.path || '';
+  }
+  setText('#chat-active-model', `model: ${status.current_model_name || (current ? current.split('/').pop() : 'local-model') || 'local-model'}`);
+  applyChatMetrics(status.metrics || {});
+};
+
+const loadChat = async () => {
+  loadChatStorage();
+  loadChatSettings();
+  renderChat();
+  await loadChatStatus();
+};
+
+const isTextFile = (file) => {
+  const ext = String(file.name || '').toLowerCase().split('.').pop();
+  return String(file.type || '').startsWith('text/') || CHAT_TEXT_EXTENSIONS.has(ext);
+};
+
+const addChatFiles = async (files) => {
+  let totalChars = state.chat.attachments.reduce((sum, file) => sum + String(file.content || '').length, 0);
+  for (const file of files) {
+    const attachment = {
+      id: makeId(),
+      name: file.name,
+      size: file.size,
+      type: file.type || 'application/octet-stream',
+      content: '',
+      truncated: false,
+    };
+    if (isTextFile(file)) {
+      const slice = file.slice(0, CHAT_MAX_FILE_CHARS);
+      attachment.content = await slice.text();
+      attachment.truncated = file.size > CHAT_MAX_FILE_CHARS || attachment.content.length >= CHAT_MAX_FILE_CHARS;
+      if (totalChars + attachment.content.length > CHAT_MAX_TOTAL_FILE_CHARS) {
+        const available = Math.max(0, CHAT_MAX_TOTAL_FILE_CHARS - totalChars);
+        attachment.content = attachment.content.slice(0, available);
+        attachment.truncated = true;
+      }
+      totalChars += attachment.content.length;
+    } else {
+      attachment.content = `[Binary attachment: ${file.name}, ${formatBytes(file.size)}, ${attachment.type}]`;
+    }
+    state.chat.attachments.push(attachment);
+  }
+  renderChatAttachments();
+};
+
+const attachmentContext = (attachments) => attachments.map((file) => [
+  `--- file: ${file.name} (${file.type || 'unknown'}, ${formatBytes(file.size)}${file.truncated ? ', trimmed' : ''}) ---`,
+  file.content || '[No readable text extracted]',
+].join('\n')).join('\n\n');
+
+const selectedChatModel = () => {
+  const value = $('#chat-model-select')?.value || '';
+  return value ? value.split('/').pop() : '';
+};
+
+const chatRequestMessages = (conversation) => {
+  const system = ($('#chat-system')?.value || '').trim();
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  for (const message of conversation.messages || []) {
+    if (message.role === 'user' || message.role === 'assistant') {
+      messages.push({ role: message.role, content: message.content || message.displayContent || '' });
+    }
+  }
+  return messages;
+};
+
+const sendChat = async () => {
+  if (state.chat.busy) return;
+  loadChatStorage();
+  const conversation = activeChat() || newChatConversation();
+  if (!activeChat()) {
+    state.chat.conversations.unshift(conversation);
+    state.chat.activeId = conversation.id;
+  }
+
+  const input = $('#chat-input');
+  const text = (input?.value || '').trim();
+  const attachments = [...state.chat.attachments];
+  if (!text && !attachments.length) throw new Error('Message is empty');
+
+  const filesText = attachmentContext(attachments);
+  const content = [text, filesText ? `Attached files:\n${filesText}` : ''].filter(Boolean).join('\n\n');
+  const displayContent = text || attachments.map((file) => file.name).join('\n');
+  const userMessage = {
+    id: makeId(),
+    role: 'user',
+    content,
+    displayContent,
+    attachments: attachments.map(({ id, name, size, type, truncated }) => ({ id, name, size, type, truncated })),
+    createdAt: Date.now(),
+  };
+
+  conversation.messages.push(userMessage);
+  conversation.updatedAt = Date.now();
+  if (!conversation.title || conversation.title === 'New chat') conversation.title = chatTitleFromText(displayContent);
+  state.chat.attachments = [];
+  if (input) input.value = '';
+  saveChatSettings();
+  saveChatStorage();
+  renderChat();
+
+  const body = {
+    model: selectedChatModel(),
+    messages: chatRequestMessages(conversation),
+    temperature: Number($('#chat-temperature')?.value || 0.7),
+    top_p: Number($('#chat-top-p')?.value || 0.95),
+  };
+  const maxTokens = $('#chat-max-tokens')?.value;
+  if (maxTokens) body.max_tokens = Number(maxTokens);
+
+  state.chat.busy = true;
+  try {
+    const response = await api('/chat', { method: 'POST', body: JSON.stringify(body) });
+    const assistantMessage = {
+      id: makeId(),
+      role: 'assistant',
+      content: response.message || JSON.stringify(response.raw || response, null, 2),
+      createdAt: Date.now(),
+      stats: {
+        elapsed_ms: response.elapsed_ms,
+        usage: response.usage,
+        used_tokens: response.used_tokens,
+        total_used_tokens: response.total_used_tokens,
+        metrics: response.metrics || {},
+      },
+    };
+    conversation.messages.push(assistantMessage);
+    conversation.updatedAt = Date.now();
+    saveChatStorage();
+    applyChatMetrics(response.metrics || {});
+    renderChat();
+  } finally {
+    state.chat.busy = false;
+  }
+};
+
+const createChat = () => {
+  const conversation = newChatConversation();
+  state.chat.conversations.unshift(conversation);
+  state.chat.activeId = conversation.id;
+  state.chat.attachments = [];
+  saveChatStorage();
+  renderChat();
+};
+
+const openChat = (id) => {
+  if (!state.chat.conversations.some((item) => item.id === id)) return;
+  state.chat.activeId = id;
+  state.chat.attachments = [];
+  saveChatStorage();
+  renderChat();
+};
+
+const deleteChat = () => {
+  const conversation = activeChat();
+  if (!conversation) return false;
+  if (!confirm('Delete this chat?')) return false;
+  state.chat.conversations = state.chat.conversations.filter((item) => item.id !== conversation.id);
+  if (!state.chat.conversations.length) state.chat.conversations = [newChatConversation()];
+  state.chat.activeId = state.chat.conversations[0].id;
+  state.chat.attachments = [];
+  saveChatStorage();
+  renderChat();
+  return true;
+};
+
+const exportChat = () => {
+  const conversation = activeChat();
+  if (!conversation) throw new Error('No active chat');
+  const blob = new Blob([JSON.stringify(conversation, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${(conversation.title || 'chat').replace(/[^a-z0-9_-]+/gi, '-').slice(0, 48)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
+const switchChatModel = async () => {
+  const path = $('#chat-model-select')?.value || '';
+  if (!path) throw new Error('Select a model first');
+  const result = await api('/models/switch', {
+    method: 'POST',
+    body: JSON.stringify({ path, restart: true }),
+  });
+  assertCommandOk(result.restart, 'Model switched, but llama restart failed');
+  await loadChatStatus();
+};
+
 const applyLogFilter = (text) => {
   const q = ($('#log-filter')?.value || '').trim().toLowerCase();
   return q ? text.split('\n').filter((line) => line.toLowerCase().includes(q)).join('\n') : text;
@@ -938,6 +1312,29 @@ const handleAction = (btn) => {
   if (action === 'load-users') return runAction(btn, loadUsers, 'Users loaded');
   if (action === 'load-models') return runAction(btn, loadModels, 'Models loaded');
   if (action === 'load-clients') return runAction(btn, loadClients, 'Clients loaded');
+  if (action === 'load-chat-status') return runAction(btn, loadChatStatus, 'Chat status loaded');
+  if (action === 'chat-new') return createChat();
+  if (action === 'chat-open') return openChat(btn.dataset.id);
+  if (action === 'chat-delete') {
+    if (deleteChat()) toast('Chat deleted', 'success');
+    return undefined;
+  }
+  if (action === 'chat-export') return runAction(btn, exportChat, 'Exported');
+  if (action === 'chat-attach') {
+    $('#chat-file-input')?.click();
+    return undefined;
+  }
+  if (action === 'chat-clear-files') {
+    state.chat.attachments = [];
+    renderChatAttachments();
+    return undefined;
+  }
+  if (action === 'chat-file-remove') {
+    state.chat.attachments = state.chat.attachments.filter((file) => file.id !== btn.dataset.id);
+    renderChatAttachments();
+    return undefined;
+  }
+  if (action === 'chat-switch-model') return runAction(btn, switchChatModel, 'Model switch queued');
   if (action === 'token-copy') return runAction(btn, () => copyText(btn.dataset.key), 'Copied');
   if (action === 'token-toggle') return runAction(btn, () => toggleToken(btn.dataset.key, btn.dataset.enabled !== 'true'), 'Updated');
   if (action === 'token-reset') return runAction(btn, () => resetToken(btn.dataset.key), 'Reset');
@@ -1004,6 +1401,22 @@ document.addEventListener('DOMContentLoaded', () => {
     runAction(event.target.querySelector('button[type=submit]'), () => loadLogs(), 'Logs loaded').catch(() => {});
   });
 
+  $('#chat-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    runAction(event.target.querySelector('button[type=submit]'), sendChat).catch(() => {});
+  });
+
+  $('#chat-file-input')?.addEventListener('change', (event) => {
+    runAction(null, async () => {
+      await addChatFiles(event.target.files || []);
+      event.target.value = '';
+    }, 'Files attached').catch(() => {});
+  });
+
+  ['#chat-temperature', '#chat-top-p', '#chat-max-tokens', '#chat-system'].forEach((selector) => {
+    $(selector)?.addEventListener('change', saveChatSettings);
+  });
+
   $('#gguf-file')?.addEventListener('change', () => {
     runAction($('#drop-zone'), uploadModel, 'Uploaded').catch(() => {});
   });
@@ -1056,3 +1469,9 @@ setInterval(() => {
     loadModels().catch(() => {});
   }
 }, 5000);
+
+setInterval(() => {
+  if ($('#app-view') && !$('#app-view').classList.contains('hidden') && state.tab === 'chat') {
+    loadChatStatus().catch(() => {});
+  }
+}, 15000);

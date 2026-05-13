@@ -110,6 +110,10 @@
                     <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg></span>
                     Models
                 </button>
+                <button class="nav-item" data-tab="chat">
+                    <span class="nav-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/><path d="M8 9h8M8 13h5"/></svg></span>
+                    AI Chat
+                </button>
 
                 <div style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); font-weight:700; padding:0 14px; margin:24px 0 8px;">Configuration</div>
                 <button class="nav-item" data-tab="settings">
@@ -381,7 +385,94 @@
                 <pre id="jobs-output" class="logs-output hidden"></pre>
             </div>
 
-            <!-- 7. SETTINGS -->
+            <!-- 7. AI CHAT -->
+            <div id="tab-chat" class="tab-panel hidden fade-in">
+                <div class="chat-hero">
+                    <div>
+                        <h4 class="eyebrow">Direct AI Console</h4>
+                        <h2>AI Chat</h2>
+                        <p>Talk to the active local model with files, history and live runtime metrics.</p>
+                    </div>
+                    <div class="hero-pills">
+                        <div class="hero-pill" id="chat-active-model">model: ...</div>
+                        <div class="hero-pill" id="chat-prompt-speed">prompt: ...</div>
+                        <div class="hero-pill" id="chat-eval-speed">eval: ...</div>
+                    </div>
+                </div>
+
+                <div class="chat-layout">
+                    <aside class="chat-sidebar card">
+                        <div class="card-header">
+                            <h3 class="card-title">Chats</h3>
+                            <button class="btn btn-secondary btn-small" data-action="chat-new">New</button>
+                        </div>
+                        <div id="chat-history" class="chat-history"></div>
+
+                        <div class="chat-control-block">
+                            <label class="form-label">Model</label>
+                            <select id="chat-model-select" class="form-select"></select>
+                            <div class="chat-inline-actions">
+                                <button class="btn btn-secondary btn-small" data-action="load-chat-status">Reload</button>
+                                <button class="btn btn-primary btn-small" data-action="chat-switch-model">Switch & Restart</button>
+                            </div>
+                        </div>
+
+                        <div class="chat-control-block">
+                            <label class="form-label">System Prompt</label>
+                            <textarea id="chat-system" class="form-textarea chat-system-input" rows="4" placeholder="Optional system instruction"></textarea>
+                        </div>
+
+                        <div class="chat-params">
+                            <div class="form-group">
+                                <label class="form-label">Temperature</label>
+                                <input type="number" id="chat-temperature" class="form-input" min="0" max="2" step="0.1" value="0.7">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Top P</label>
+                                <input type="number" id="chat-top-p" class="form-input" min="0" max="1" step="0.05" value="0.95">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Max Tokens</label>
+                                <input type="number" id="chat-max-tokens" class="form-input" min="1" step="64" placeholder="auto">
+                            </div>
+                        </div>
+                    </aside>
+
+                    <section class="chat-main card">
+                        <div class="chat-main-header">
+                            <div>
+                                <h3 class="card-title" id="chat-title">New chat</h3>
+                                <p class="card-subtitle" id="chat-subtitle">0 messages</p>
+                            </div>
+                            <div class="action-buttons">
+                                <button class="btn btn-secondary btn-small" data-action="chat-export">Export</button>
+                                <button class="btn btn-danger btn-small" data-action="chat-delete">Delete</button>
+                            </div>
+                        </div>
+
+                        <div id="chat-messages" class="chat-messages">
+                            <div class="chat-empty">
+                                <span>AI</span>
+                                <strong>Ready</strong>
+                            </div>
+                        </div>
+
+                        <div id="chat-attachments" class="chat-attachments"></div>
+
+                        <form id="chat-form" class="chat-composer">
+                            <textarea id="chat-input" class="form-textarea chat-input" rows="4" placeholder="Message the local AI..."></textarea>
+                            <div class="chat-composer-actions">
+                                <input type="file" id="chat-file-input" class="hidden" multiple>
+                                <button type="button" class="btn btn-secondary btn-small" data-action="chat-attach">Attach Files</button>
+                                <button type="button" class="btn btn-secondary btn-small" data-action="chat-clear-files">Clear Files</button>
+                                <button type="submit" class="btn btn-primary">Send</button>
+                            </div>
+                        </form>
+                    </section>
+                </div>
+            </div>
+
+            <!-- 8. SETTINGS -->
             <div id="tab-settings" class="tab-panel hidden fade-in">
                 <div class="card" style="margin-bottom:16px;">
                     <div class="card-header"><h3 class="card-title">System Prompt</h3></div>
@@ -423,7 +514,7 @@
                 </div>
             </div>
 
-            <!-- 8. CLIENTS -->
+            <!-- 9. CLIENTS -->
             <div id="tab-clients" class="tab-panel hidden fade-in">
                 <div class="clients-hero">
                     <div>
@@ -447,7 +538,7 @@
                 <pre id="clients-output" class="logs-output hidden"></pre>
             </div>
 
-            <!-- 9. LOGS -->
+            <!-- 10. LOGS -->
             <div id="tab-logs" class="tab-panel hidden fade-in">
                 <div class="card" style="margin-bottom:16px;">
                     <form id="logs-form" class="stack-form" style="grid-template-columns: 1fr auto auto auto; gap:12px; align-items:end;">

@@ -32,6 +32,10 @@ MODELS_DIR = STACK_ROOT / "models"
 CATALOG_FILE = STACK_ROOT / "config" / "models.catalog.json"
 TOKEN_GATEWAY_URL = os.getenv("TOKEN_GATEWAY_URL", "http://token-gateway:9000").rstrip("/")
 TOKEN_GATEWAY_ADMIN_KEY = os.getenv("TOKEN_GATEWAY_ADMIN_KEY", os.getenv("ADMIN_KEY", ""))
+ADMIN_CHAT_TOKEN_NAME = os.getenv("ADMIN_UI_CHAT_TOKEN_NAME", "admin-ui-chat")
+ADMIN_CHAT_REQUEST_TIMEOUT = int(float(os.getenv("ADMIN_CHAT_REQUEST_TIMEOUT", os.getenv("REQUEST_TIMEOUT", "1200"))))
+CHAT_MAX_MESSAGES = int(os.getenv("ADMIN_UI_CHAT_MAX_MESSAGES", "60"))
+CHAT_MAX_CONTENT_CHARS = int(os.getenv("ADMIN_UI_CHAT_MAX_CONTENT_CHARS", "180000"))
 DOMAIN = os.getenv("DOMAIN", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL") or (f"https://{DOMAIN}" if DOMAIN else "http://127.0.0.1")
 SECRET_KEY = os.getenv("ADMIN_UI_SECRET", os.getenv("ADMIN_WEB_SECRET", "local-ai-admin-change-me"))
@@ -895,6 +899,95 @@ async def token_gateway_json(method: str, path: str, json_data: Optional[dict[st
         return JSONResponse({"detail": f"token-gateway is not reachable: {exc}"}, status_code=502)
     return JSONResponse(response_payload(response), status_code=response.status_code)
 
+
+async def ensure_admin_chat_token() -> str:
+    try:
+        response = await token_gateway_request("GET", "/admin/tokens", timeout=10)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"token-gateway is not reachable: {exc}")
+
+    payload = response_payload(response)
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=payload)
+
+    if isinstance(payload, dict):
+        for token in payload.get("tokens", []):
+            if not isinstance(token, dict):
+                continue
+            if token.get("name") != ADMIN_CHAT_TOKEN_NAME:
+                continue
+            key = str(token.get("key") or "")
+            if not key:
+                continue
+            if not token.get("enabled", True) or not token.get("unlimited", False):
+                patch = await token_gateway_request(
+                    "PATCH",
+                    f"/admin/tokens/{key}",
+                    json_data={"enabled": True, "unlimited": True},
+                    timeout=10,
+                )
+                if patch.status_code >= 400:
+                    raise HTTPException(status_code=patch.status_code, detail=response_payload(patch))
+            return key
+
+    create = await token_gateway_request(
+        "POST",
+        "/admin/tokens",
+        json_data={"name": ADMIN_CHAT_TOKEN_NAME, "unlimited": True},
+        timeout=10,
+    )
+    created = response_payload(create)
+    if create.status_code >= 400 or not isinstance(created, dict) or not created.get("key"):
+        raise HTTPException(status_code=create.status_code, detail=created)
+    return str(created["key"])
+
+
+def sanitize_chat_messages(raw_messages: Any) -> list[dict[str, str]]:
+    if not isinstance(raw_messages, list) or not raw_messages:
+        raise HTTPException(status_code=400, detail="messages are required")
+
+    messages: list[dict[str, str]] = []
+    total_chars = 0
+    for item in raw_messages[-CHAT_MAX_MESSAGES:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"system", "user", "assistant"}:
+            continue
+        content = str(item.get("content") or "")
+        if not content.strip():
+            continue
+        total_chars += len(content)
+        if total_chars > CHAT_MAX_CONTENT_CHARS:
+            raise HTTPException(status_code=413, detail="chat context is too large")
+        messages.append({"role": role, "content": content})
+
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages are empty")
+    return messages
+
+
+def chat_model_name(data: dict[str, Any]) -> str:
+    requested = str(data.get("model") or "").strip()
+    if requested:
+        return requested
+    env = env_parse()
+    model_path = env.get("MODEL_PATH", "")
+    return env.get("MODEL_ID") or (Path(model_path).name if model_path else "local-model")
+
+
+def models_payload() -> dict[str, Any]:
+    local = []
+    for p in sorted(MODELS_DIR.rglob("*.gguf")):
+        local.append({"name": p.name, "path": "/models/" + str(p.relative_to(MODELS_DIR)).replace(os.sep, "/"), "size": p.stat().st_size})
+    catalog = []
+    if CATALOG_FILE.exists():
+        try:
+            catalog = json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"local": local, "catalog": catalog, "current": env_parse().get("MODEL_PATH", "")}
+
 @app.get("/")
 def root():
     return FileResponse(APP_DIR / "static" / "index.html")
@@ -1036,6 +1129,79 @@ async def api_save_settings(request: Request, _: User = Depends(current_user)):
             gateway_error = str(exc)
     return {"ok": True, "saved": sorted(to_write.keys()), "gateway_config": gateway_config, "gateway_error": gateway_error}
 
+@app.get("/api/chat/status")
+def api_chat_status(_: User = Depends(current_user)):
+    env = env_parse()
+    models = models_payload()
+    current = models.get("current", "")
+    return {
+        "current_model_path": current,
+        "current_model_name": Path(current).name if current else env.get("MODEL_ID", ""),
+        "models": models.get("local", []),
+        "metrics": parse_llama_logs(),
+        "limits": {
+            "max_messages": CHAT_MAX_MESSAGES,
+            "max_content_chars": CHAT_MAX_CONTENT_CHARS,
+        },
+    }
+
+@app.post("/api/chat")
+async def api_chat(request: Request, _: User = Depends(current_user)):
+    data = await request.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="JSON object is required")
+
+    messages = sanitize_chat_messages(data.get("messages"))
+    model = chat_model_name(data)
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+    }
+
+    for key in ("temperature", "top_p", "max_tokens"):
+        if key in data and data[key] not in {"", None}:
+            payload[key] = data[key]
+
+    chat_token = await ensure_admin_chat_token()
+    headers = {"Authorization": f"Bearer {chat_token}", "Content-Type": "application/json"}
+
+    start = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=ADMIN_CHAT_REQUEST_TIMEOUT) as client:
+            response = await client.post(f"{TOKEN_GATEWAY_URL}/v1/chat/completions", headers=headers, json=payload)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"chat request failed: {exc}")
+
+    elapsed_ms = int((time.time() - start) * 1000)
+    response_data = response_payload(response)
+    if response.status_code >= 400:
+        return JSONResponse(response_data, status_code=response.status_code)
+
+    assistant_content = ""
+    if isinstance(response_data, dict):
+        choices = response_data.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict):
+                message = first.get("message")
+                if isinstance(message, dict):
+                    assistant_content = str(message.get("content") or "")
+                elif "text" in first:
+                    assistant_content = str(first.get("text") or "")
+
+    return {
+        "ok": True,
+        "model": model,
+        "message": assistant_content,
+        "raw": response_data,
+        "usage": response_data.get("usage", {}) if isinstance(response_data, dict) else {},
+        "elapsed_ms": elapsed_ms,
+        "used_tokens": response.headers.get("x-token-used-this-request", ""),
+        "total_used_tokens": response.headers.get("x-token-used-total", ""),
+        "metrics": parse_llama_logs(),
+    }
+
 def docker_stats_summary(raw: dict) -> dict:
     try:
         mem_usage = raw.get("memory_stats", {}).get("usage", 0)
@@ -1146,14 +1312,7 @@ def api_logs(service: str, tail: int = 200, _: User = Depends(current_user)):
 
 @app.get("/api/models")
 def api_models(_: User = Depends(current_user)):
-    local = []
-    for p in sorted(MODELS_DIR.rglob("*.gguf")):
-        local.append({"name": p.name, "path": "/models/" + str(p.relative_to(MODELS_DIR)).replace(os.sep, "/"), "size": p.stat().st_size})
-    catalog = []
-    if CATALOG_FILE.exists():
-        try: catalog = json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
-        except Exception: pass
-    return {"local": local, "catalog": catalog, "current": env_parse().get("MODEL_PATH", "")}
+    return models_payload()
 
 @app.post("/api/models/switch")
 async def api_model_switch(request: Request, _: User = Depends(current_user)):

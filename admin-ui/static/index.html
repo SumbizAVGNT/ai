@@ -3,244 +3,315 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Local AI Stack Sakura Admin</title>
-  <link rel="stylesheet" href="static/style.css?v=6">
+  <title>Local AI Stack Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="static/style.css?v=7">
 </head>
 <body>
-  <div id="toast" class="toast hidden"></div>
-  <div class="scene-decor" aria-hidden="true">
-    <span class="petal-field"></span>
-    <span class="circuit-corner left"></span>
-    <span class="circuit-corner right"></span>
-  </div>
-
-  <section id="login-view" class="login-view hidden">
-    <form id="login-form" class="login-panel" autocomplete="on">
-      <img class="login-mascot" src="static/assets/anime/characters_transparent/chibi_catgirl_sitting_transparent.png" alt="">
-      <div class="logo">AI</div>
-      <h1>Sakura Admin</h1>
-      <p class="muted">Local AI Stack</p>
-      <label>
-        <span>Login</span>
-        <input id="login-user" name="username" value="admin" autocomplete="username" required>
-      </label>
-      <label>
-        <span>Password</span>
-        <input id="login-pass" name="password" type="password" autocomplete="current-password" required>
-      </label>
-      <button type="submit">Sign in</button>
-      <div id="login-error" class="inline-error"></div>
+  <div id="toast-container" class="toast-container"></div>
+  
+  <section id="login-view" class="login-container hidden">
+    <form id="login-form" class="login-card" autocomplete="on">
+      <div class="login-header">
+        <div class="login-logo">AI</div>
+        <h1 class="login-title">Sakura Admin</h1>
+        <p class="login-subtitle">Local AI Stack Management</p>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="login-user">Login</label>
+        <input id="login-user" name="username" class="form-input" value="admin" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="login-pass">Password</label>
+        <input id="login-pass" name="password" type="password" class="form-input" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-large" style="width: 100%">Sign in</button>
+      <div id="login-error" class="alert alert-error hidden" style="margin-top: 16px"></div>
     </form>
   </section>
 
-  <section id="app-view" class="app hidden">
+  <section id="app-view" class="app-layout hidden">
     <aside class="sidebar">
-      <div class="brand">
-        <img class="brand-avatar" src="static/assets/anime/avatars_transparent/avatar_dark_admin_transparent.png" alt="">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">AI</div>
         <div>
-          <strong>Sakura AI</strong>
-          <small>Admin deck</small>
+          <div class="sidebar-title">Sakura AI</div>
+          <div class="sidebar-subtitle">Admin Panel</div>
         </div>
       </div>
 
       <nav class="nav-list" aria-label="Admin sections">
-        <button class="nav active" data-tab="overview"><span>Overview</span></button>
-        <button class="nav" data-tab="tokens"><span>Tokens</span></button>
-        <button class="nav" data-tab="users"><span>Users</span></button>
-        <button class="nav" data-tab="models"><span>Models</span></button>
-        <button class="nav" data-tab="settings"><span>Llama & Prompt</span></button>
-        <button class="nav" data-tab="clients"><span>Clients</span></button>
-        <button class="nav" data-tab="updates"><span>Updates</span><span id="update-dot" class="dot hidden"></span></button>
-        <button class="nav" data-tab="logs"><span>Logs</span></button>
+        <button class="nav-item active" data-tab="overview">
+          <span class="nav-icon">📊</span>
+          <span>Overview</span>
+        </button>
+        <button class="nav-item" data-tab="tokens">
+          <span class="nav-icon">🔑</span>
+          <span>Tokens</span>
+        </button>
+        <button class="nav-item" data-tab="users">
+          <span class="nav-icon">👥</span>
+          <span>Users</span>
+        </button>
+        <button class="nav-item" data-tab="models">
+          <span class="nav-icon">🧠</span>
+          <span>Models</span>
+        </button>
+        <button class="nav-item" data-tab="settings">
+          <span class="nav-icon">⚙️</span>
+          <span>Llama & Prompt</span>
+        </button>
+        <button class="nav-item" data-tab="clients">
+          <span class="nav-icon">🤖</span>
+          <span>Clients</span>
+        </button>
+        <button class="nav-item" data-tab="updates">
+          <span class="nav-icon">🔄</span>
+          <span>Updates</span>
+          <span id="update-dot" class="badge badge-warning hidden" style="margin-left: auto">!</span>
+        </button>
+        <button class="nav-item" data-tab="logs">
+          <span class="nav-icon">📜</span>
+          <span>Logs</span>
+        </button>
       </nav>
 
-      <div class="side-actions">
-        <button class="secondary" data-action="refresh">Refresh</button>
-        <button class="danger" data-action="stack-restart">Restart stack</button>
-        <button class="secondary" data-action="logout">Logout</button>
+      <div class="sidebar-footer">
+        <button class="btn btn-secondary btn-small" data-action="refresh">⟳ Refresh</button>
+        <button class="btn btn-danger btn-small" data-action="stack-restart">⏻ Restart Stack</button>
+        <button class="btn btn-secondary btn-small" data-action="logout">🚪 Logout</button>
       </div>
     </aside>
 
-    <main class="content">
-      <header class="topbar">
+    <main class="main-content">
+      <header class="top-bar">
         <div>
-          <h2 id="page-title">Overview</h2>
-          <p id="page-subtitle" class="muted">Runtime state, services and quick controls.</p>
+          <h1 id="page-title" class="page-title">Overview</h1>
+          <p id="page-subtitle" class="page-subtitle">Runtime state, services and quick controls.</p>
         </div>
-        <div class="user-pill"><span id="user-pill">admin</span></div>
+        <div class="user-info">
+          <div class="user-avatar">A</div>
+          <span id="user-pill">admin</span>
+        </div>
       </header>
 
-      <div id="page-alert" class="page-alert hidden"></div>
+      <div id="page-alert" class="alert alert-error hidden"></div>
 
       <section id="tab-overview" class="tab-panel">
-        <section class="hero-panel">
-          <div class="hero-copy">
-            <span class="eyebrow">Sakura Command Center</span>
-            <h1>Local AI Stack</h1>
-            <div class="hero-meta">
-              <span id="hero-backend">backend: ...</span>
-              <span id="hero-model">model: ...</span>
-              <span id="hero-url">url: ...</span>
-            </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">CPU Usage</div>
+            <div class="stat-value" id="metric-cpu">-</div>
           </div>
-          <img class="hero-character" src="static/assets/anime/characters_transparent/chibi_catgirl_sitting_transparent.png" alt="">
-        </section>
-
-        <div class="metrics">
-          <div class="metric"><span>CPU</span><strong id="metric-cpu">...</strong></div>
-          <div class="metric"><span>RAM</span><strong id="metric-ram">...</strong></div>
-          <div class="metric"><span>Disk</span><strong id="metric-disk">...</strong></div>
-          <div class="metric"><span>Prompt speed</span><strong id="metric-speed">...</strong></div>
-          <div class="metric"><span>Eval speed</span><strong id="metric-eval-speed">...</strong></div>
-          <div class="metric"><span>Uptime</span><strong id="metric-uptime">...</strong></div>
+          <div class="stat-card">
+            <div class="stat-label">RAM Usage</div>
+            <div class="stat-value" id="metric-ram">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Disk Usage</div>
+            <div class="stat-value" id="metric-disk">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Prompt Speed</div>
+            <div class="stat-value" id="metric-speed">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Eval Speed</div>
+            <div class="stat-value" id="metric-eval-speed">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Uptime</div>
+            <div class="stat-value" id="metric-uptime">-</div>
+          </div>
         </div>
 
-        <div class="split">
-          <section class="panel">
-            <div class="panel-head">
-              <h3>Containers</h3>
-              <button class="secondary small" data-action="load-system">Reload</button>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Containers</h2>
+              <button class="btn btn-secondary btn-small" data-action="load-system">Reload</button>
             </div>
-            <div id="containers-list" class="list"></div>
-          </section>
+            <div id="containers-list" class="table-container"></div>
+          </div>
 
-          <section class="panel">
-            <div class="panel-head">
-              <h3>Stack controls</h3>
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Stack Controls</h2>
             </div>
-            <div class="button-grid">
-              <button data-action="stack-start">Start</button>
-              <button class="secondary" data-action="stack-stop">Stop</button>
-              <button class="secondary" data-action="stack-status">Status</button>
-              <button class="danger" data-action="stack-down">Down</button>
+            <div class="action-buttons" style="margin-bottom: 16px">
+              <button class="btn btn-success btn-small" data-action="stack-start">Start</button>
+              <button class="btn btn-secondary btn-small" data-action="stack-stop">Stop</button>
+              <button class="btn btn-secondary btn-small" data-action="stack-status">Status</button>
+              <button class="btn btn-danger btn-small" data-action="stack-down">Down</button>
             </div>
-            <pre id="command-output" class="command-output hidden"></pre>
-          </section>
+            <pre id="command-output" class="logs-output hidden"></pre>
+          </div>
         </div>
       </section>
 
       <section id="tab-tokens" class="tab-panel hidden">
-        <section class="panel">
-          <form id="token-form" class="toolbar">
-            <input id="token-name" placeholder="Token name" required>
-            <input id="token-limit" inputmode="numeric" placeholder="Limit, empty for unlimited">
-            <label class="check"><input id="token-unlimited" type="checkbox" checked> Unlimited</label>
-            <button type="submit">Create token</button>
+        <div class="card" style="margin-bottom: 16px">
+          <form id="token-form" class="toolbar" style="margin-bottom: 0">
+            <input id="token-name" class="form-input" placeholder="Token name" required style="flex: 1; min-width: 150px">
+            <input id="token-limit" class="form-input" inputmode="numeric" placeholder="Limit (optional)" style="width: 150px">
+            <label class="form-checkbox">
+              <input id="token-unlimited" type="checkbox" checked>
+              <span>Unlimited</span>
+            </label>
+            <button type="submit" class="btn btn-primary">Create Token</button>
           </form>
-        </section>
-        <section class="panel">
-          <div class="panel-head">
-            <h3>Tokens</h3>
-            <button class="secondary small" data-action="load-tokens">Reload</button>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Tokens</h2>
+            <button class="btn btn-secondary btn-small" data-action="load-tokens">Reload</button>
           </div>
-          <div id="tokens-list" class="list"></div>
-        </section>
+          <div id="tokens-list" class="table-container"></div>
+        </div>
       </section>
 
       <section id="tab-users" class="tab-panel hidden">
-        <section class="panel">
-          <form id="user-form" class="toolbar">
-            <input id="new-user" placeholder="Login" required>
-            <input id="new-pass" type="password" placeholder="Password" required>
-            <button type="submit">Create user</button>
+        <div class="card" style="margin-bottom: 16px">
+          <form id="user-form" class="toolbar" style="margin-bottom: 0">
+            <input id="new-user" class="form-input" placeholder="Login" required style="flex: 1">
+            <input id="new-pass" type="password" class="form-input" placeholder="Password" required style="flex: 1">
+            <button type="submit" class="btn btn-primary">Create User</button>
           </form>
-        </section>
-        <section class="panel">
-          <div class="panel-head">
-            <h3>Users</h3>
-            <button class="secondary small" data-action="load-users">Reload</button>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Users</h2>
+            <button class="btn btn-secondary btn-small" data-action="load-users">Reload</button>
           </div>
-          <div id="users-list" class="list"></div>
-        </section>
+          <div id="users-list" class="table-container"></div>
+        </div>
       </section>
 
       <section id="tab-models" class="tab-panel hidden">
-        <div class="split">
-          <section class="panel">
-            <div class="panel-head">
-              <h3>Local GGUF</h3>
-              <button class="secondary small" data-action="load-models">Reload</button>
+        <div class="grid-2" style="margin-bottom: 16px">
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Local GGUF Models</h2>
+              <button class="btn btn-secondary btn-small" data-action="load-models">Reload</button>
             </div>
-            <div id="models-local" class="list"></div>
-          </section>
-          <section class="panel">
-            <h3>Download from HuggingFace</h3>
+            <div id="models-local" class="table-container"></div>
+          </div>
+          <div class="card">
+            <h2 class="card-title" style="margin-bottom: 16px">Download from HuggingFace</h2>
             <form id="hf-form" class="stack-form">
-              <input id="hf-repo" placeholder="Repo, e.g. Qwen/Qwen2.5-Coder-7B-Instruct-GGUF" required>
-              <input id="hf-include" placeholder="Include pattern, e.g. *q4_k_m.gguf">
-              <input id="hf-dir" placeholder="Local directory name">
-              <button type="submit">Download</button>
+              <div class="form-group">
+                <label class="form-label">Repository</label>
+                <input id="hf-repo" class="form-input" placeholder="e.g. Qwen/Qwen2.5-Coder-7B-Instruct-GGUF" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Include Pattern</label>
+                <input id="hf-include" class="form-input" placeholder="e.g. *q4_k_m.gguf">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Local Directory</label>
+                <input id="hf-dir" class="form-input" placeholder="Optional directory name">
+              </div>
+              <button type="submit" class="btn btn-primary" style="width: 100%">Download</button>
             </form>
-            <div class="upload-line">
-              <input id="gguf-file" type="file" accept=".gguf">
-              <button class="secondary" data-action="upload-model">Upload GGUF</button>
+            <div style="margin-top: 16px; display: flex; gap: 10px; align-items: center">
+              <input id="gguf-file" type="file" accept=".gguf" class="form-input" style="flex: 1">
+              <button class="btn btn-secondary" data-action="upload-model">Upload</button>
             </div>
-          </section>
+          </div>
         </div>
-        <section class="panel">
-          <h3>Catalog</h3>
-          <div id="models-catalog" class="catalog-grid"></div>
-          <pre id="jobs-output" class="command-output hidden"></pre>
-        </section>
+        <div class="card">
+          <h2 class="card-title" style="margin-bottom: 16px">Model Catalog</h2>
+          <div id="models-catalog" class="grid-2"></div>
+          <pre id="jobs-output" class="logs-output hidden"></pre>
+        </div>
       </section>
 
       <section id="tab-settings" class="tab-panel hidden">
-        <form id="settings-form" class="split">
-          <section class="panel">
-            <h3>System prompt</h3>
-            <textarea id="prompt" rows="12"></textarea>
-          </section>
-          <section class="panel">
-            <h3>llama.cpp args</h3>
-            <label><span>CTX_SIZE</span><input id="CTX_SIZE"></label>
-            <label><span>THREADS</span><input id="THREADS"></label>
-            <label><span>PARALLEL_SLOTS</span><input id="PARALLEL_SLOTS"></label>
-            <label><span>N_GPU_LAYERS</span><input id="N_GPU_LAYERS"></label>
-            <label><span>LLAMA_TIMEOUT</span><input id="LLAMA_TIMEOUT"></label>
-            <div class="button-grid">
-              <button type="submit">Save</button>
-              <button type="button" class="secondary" data-action="save-settings-restart">Save and restart</button>
+        <form id="settings-form" class="grid-2">
+          <div class="card">
+            <h2 class="card-title" style="margin-bottom: 16px">System Prompt</h2>
+            <textarea id="prompt" class="form-textarea" rows="12" style="width: 100%"></textarea>
+          </div>
+          <div class="card">
+            <h2 class="card-title" style="margin-bottom: 16px">llama.cpp Settings</h2>
+            <div class="form-group">
+              <label class="form-label">CTX_SIZE</label>
+              <input id="CTX_SIZE" class="form-input">
             </div>
-          </section>
+            <div class="form-group">
+              <label class="form-label">THREADS</label>
+              <input id="THREADS" class="form-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label">PARALLEL_SLOTS</label>
+              <input id="PARALLEL_SLOTS" class="form-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label">N_GPU_LAYERS</label>
+              <input id="N_GPU_LAYERS" class="form-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label">LLAMA_TIMEOUT</label>
+              <input id="LLAMA_TIMEOUT" class="form-input">
+            </div>
+            <div class="action-buttons" style="margin-top: 20px">
+              <button type="submit" class="btn btn-primary">Save Settings</button>
+              <button type="button" class="btn btn-secondary" data-action="save-settings-restart">Save & Restart</button>
+            </div>
+          </div>
         </form>
       </section>
 
       <section id="tab-clients" class="tab-panel hidden">
-        <section class="panel">
-          <div class="panel-head">
-            <h3>Clients</h3>
-            <button class="secondary small" data-action="load-clients">Reload</button>
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Clients</h2>
+            <button class="btn btn-secondary btn-small" data-action="load-clients">Reload</button>
           </div>
-          <div id="clients-list" class="list"></div>
-        </section>
+          <div id="clients-list" class="table-container"></div>
+        </div>
       </section>
 
       <section id="tab-updates" class="tab-panel hidden">
-        <section class="panel update-panel">
-          <div class="update-head">
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border-light)">
             <div>
-              <span id="update-state" class="status">Checking</span>
-              <h3 id="update-title">Checking for updates</h3>
-              <p id="update-copy" class="muted">Comparing this install with GitHub.</p>
+              <span id="update-state" class="badge badge-info">Checking</span>
+              <h2 id="update-title" style="margin: 10px 0 6px; font-size: 20px">Checking for updates</h2>
+              <p id="update-copy" class="text-secondary" style="font-size: 14px">Comparing this install with GitHub.</p>
             </div>
-            <div class="button-row">
-              <button class="secondary" data-action="load-update">Check</button>
-              <button id="update-apply" data-action="apply-update" disabled>Download and restart</button>
+            <div class="action-buttons">
+              <button class="btn btn-secondary" data-action="load-update">Check</button>
+              <button id="update-apply" class="btn btn-primary" data-action="apply-update" disabled>Download & Restart</button>
             </div>
           </div>
-          <div class="version-grid">
-            <div><span>Installed</span><strong id="update-current">...</strong><small id="update-current-msg">...</small></div>
-            <div><span>GitHub</span><strong id="update-latest">...</strong><small id="update-latest-msg">...</small></div>
-            <div><span>Branch</span><strong id="update-branch">...</strong><small id="update-remote">...</small></div>
+          <div class="grid-3" style="margin-top: 16px">
+            <div class="card" style="padding: 14px">
+              <div class="stat-label">Installed</div>
+              <div class="stat-value" id="update-current" style="font-size: 18px">-</div>
+              <small id="update-current-msg" class="text-secondary">-</small>
+            </div>
+            <div class="card" style="padding: 14px">
+              <div class="stat-label">GitHub</div>
+              <div class="stat-value" id="update-latest" style="font-size: 18px">-</div>
+              <small id="update-latest-msg" class="text-secondary">-</small>
+            </div>
+            <div class="card" style="padding: 14px">
+              <div class="stat-label">Branch</div>
+              <div class="stat-value" id="update-branch" style="font-size: 18px">-</div>
+              <small id="update-remote" class="text-secondary">-</small>
+            </div>
           </div>
-          <pre id="update-progress" class="command-output hidden"></pre>
-        </section>
+          <pre id="update-progress" class="logs-output hidden"></pre>
+        </div>
       </section>
 
       <section id="tab-logs" class="tab-panel hidden">
-        <section class="panel">
-          <form id="logs-form" class="toolbar">
-            <select id="log-service">
+        <div class="card">
+          <form id="logs-form" class="toolbar" style="margin-bottom: 16px">
+            <select id="log-service" class="form-select" style="flex: 1; min-width: 150px">
               <option>admin-ui</option>
               <option>nginx</option>
               <option>local-ai-nginx</option>
@@ -254,16 +325,19 @@
               <option>certbot</option>
               <option>local-ai-certbot</option>
             </select>
-            <input id="log-filter" placeholder="Filter logs">
-            <label class="check"><input id="logs-follow" type="checkbox"> Follow</label>
-            <button type="submit">Load logs</button>
+            <input id="log-filter" class="form-input" placeholder="Filter logs..." style="flex: 1; min-width: 150px">
+            <label class="form-checkbox">
+              <input id="logs-follow" type="checkbox">
+              <span>Follow</span>
+            </label>
+            <button type="submit" class="btn btn-primary">Load Logs</button>
           </form>
-          <pre id="logs-output" class="logs"></pre>
-        </section>
+          <pre id="logs-output" class="logs-output"></pre>
+        </div>
       </section>
     </main>
   </section>
 
-  <script src="static/app.js?v=6"></script>
+  <script src="static/app.js?v=7"></script>
 </body>
 </html>

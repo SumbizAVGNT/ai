@@ -1,23 +1,28 @@
+```
+# Build artifacts
+dist/
+build/
+*.min.js
+*.min.css
+*.bundle.js
+
+# Dependencies
+node_modules/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Environment
 .env
-.installer-venv/
-.installer-state.json
-admin_key.txt
-admin_login.txt
+.env.local
+*.env.*
 
-data/tokens.json
-data/*.tmp
+# Editors
+.vscode/
+.idea/
 
-backups/
-certbot/conf/
-certbot/www/
-models/
-opencode-config/
-postgres/
-projects/
-anime_admin_site_assets_v2/
-
-__pycache__/
-*.py[cod]
-.pytest_cache/
-
+# OS generated files
 .DS_Store
+Thumbs.db
+```

@@ -10,16 +10,17 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
+from datetime import datetime, timedelta
 
 import docker
 import httpx
 import psutil
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from passlib.context import CryptContext
-from sqlalchemy import Boolean, Column, Integer, String, create_engine, select
+from sqlalchemy import Boolean, Column, Integer, String, create_engine, select, Text
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 APP_DIR = Path(__file__).resolve().parent
@@ -96,6 +97,29 @@ class User(Base):
     updated_at = Column(Integer, default=lambda: int(time.time()))
 
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True)
+    action = Column(String(256), nullable=False)
+    resource = Column(String(256), nullable=True)
+    details = Column(Text, nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    created_at = Column(Integer, default=lambda: int(time.time()))
+
+
+class GPUMetric(Base):
+    __tablename__ = "gpu_metrics"
+    id = Column(Integer, primary_key=True)
+    gpu_index = Column(Integer, default=0)
+    name = Column(String(256), nullable=True)
+    utilization = Column(Integer, nullable=True)
+    memory_used = Column(Integer, nullable=True)
+    memory_total = Column(Integer, nullable=True)
+    temperature = Column(Integer, nullable=True)
+    created_at = Column(Integer, default=lambda: int(time.time()))
+
+
 def bcrypt_secret(secret: str) -> str:
     raw = str(secret or "").encode("utf-8")
     if len(raw) <= BCRYPT_MAX_BYTES:
@@ -139,6 +163,20 @@ def init_db() -> None:
 
         db.add(User(username=DEFAULT_ADMIN_USER, password_hash=hash_password(DEFAULT_ADMIN_PASSWORD), is_admin=True, enabled=True))
         db.commit()
+
+
+def log_audit(db: Session, user: Optional[User], action: str, resource: Optional[str] = None, details: Optional[str] = None, ip_address: Optional[str] = None):
+    try:
+        db.add(AuditLog(
+            user_id=user.id if user else None,
+            action=action,
+            resource=resource,
+            details=details,
+            ip_address=ip_address
+        ))
+        db.commit()
+    except Exception:
+        pass
 
 @app.on_event("startup")
 def startup() -> None:

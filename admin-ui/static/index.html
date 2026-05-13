@@ -9,16 +9,17 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/darkly/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="static/style.css?v=10">
+  <link rel="stylesheet" href="static/style.css?v=11">
 </head>
 <body>
+  <div class="bg-grid" aria-hidden="true"></div>
   <div id="toast-container" class="toast-container"></div>
   
   <section id="login-view" class="login-container hidden">
     <form id="login-form" class="login-card" autocomplete="on">
       <div class="login-header">
         <div class="login-logo">AI</div>
-        <h1 class="login-title">Sakura Admin</h1>
+        <h1 class="login-title">Local AI Admin</h1>
         <p class="login-subtitle">Local AI Stack Management</p>
       </div>
       <div class="form-group">
@@ -35,20 +36,22 @@
   </section>
 
   <section id="app-view" class="app-layout hidden">
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-logo">AI</div>
         <div>
-          <div class="sidebar-title">Sakura AI</div>
-          <div class="sidebar-subtitle">Admin Panel</div>
+          <div class="sidebar-title">Local AI</div>
+          <div class="sidebar-subtitle">Admin Panel v3.2</div>
         </div>
       </div>
 
       <nav class="nav-list" aria-label="Admin sections">
+        <div class="nav-label">Monitoring</div>
         <button class="nav-item active" data-tab="overview">
           <i class="bi bi-speedometer2 nav-icon" aria-hidden="true"></i>
           <span>Overview</span>
         </button>
+        <div class="nav-label">Management</div>
         <button class="nav-item" data-tab="tokens">
           <i class="bi bi-key nav-icon" aria-hidden="true"></i>
           <span>Tokens</span>
@@ -61,6 +64,7 @@
           <i class="bi bi-hdd-network nav-icon" aria-hidden="true"></i>
           <span>Models</span>
         </button>
+        <div class="nav-label">Configuration</div>
         <button class="nav-item" data-tab="settings">
           <i class="bi bi-sliders nav-icon" aria-hidden="true"></i>
           <span>Llama & Prompt</span>
@@ -113,9 +117,26 @@
 
     <main class="main-content">
       <header class="top-bar">
-        <div>
-          <h1 id="page-title" class="page-title">Overview</h1>
-          <p id="page-subtitle" class="page-subtitle">Runtime state, services and quick controls.</p>
+        <div class="topbar-title">
+          <button type="button" class="menu-toggle icon-btn" data-action="toggle-sidebar" title="Menu">
+            <i class="bi bi-list"></i>
+          </button>
+          <div>
+            <h1 id="page-title" class="page-title">Overview</h1>
+            <p id="page-subtitle" class="page-subtitle">Runtime state, services and quick controls.</p>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <label class="search-box" aria-label="Search">
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input id="global-search" type="search" placeholder="Search..." autocomplete="off">
+          </label>
+          <button type="button" class="icon-btn" data-action="refresh" title="Refresh">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="icon-btn" data-tab="updates" title="Updates">
+            <i class="bi bi-bell" aria-hidden="true"></i>
+          </button>
         </div>
       </header>
 
@@ -400,6 +421,6 @@
     </main>
   </section>
 
-  <script src="static/app.js?v=10"></script>
+  <script src="static/app.js?v=11"></script>
 </body>
 </html>

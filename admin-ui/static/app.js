@@ -230,6 +230,9 @@ function setActiveTab(tab) {
   setText("#page-title", $(`.nav-item[data-tab="${tab}"]`)?.textContent.trim() || tab);
   setText("#page-subtitle", subtitles[tab] || "");
   pageError("");
+  if (window.matchMedia("(max-width: 1024px)").matches) {
+    $("#sidebar")?.classList.remove("open");
+  }
   loadCurrentTab();
 }
 
@@ -245,6 +248,8 @@ async function loadCurrentTab() {
     if (state.tab === "logs") await loadLogs();
   } catch (error) {
     pageError(errorText(error));
+  } finally {
+    syncGlobalSearch();
   }
 }
 
@@ -801,6 +806,21 @@ function toggleUserInfo(button) {
   }
 }
 
+function toggleSidebar() {
+  $("#sidebar")?.classList.toggle("open");
+}
+
+function syncGlobalSearch() {
+  const query = $("#global-search")?.value.trim().toLowerCase() || "";
+  const panel = $(`#tab-${state.tab}`);
+  if (!panel) return;
+  const items = panel.querySelectorAll(".list-row, .client-card, .catalog-card, .client-summary-card");
+  items.forEach((item) => {
+    const matched = !query || item.textContent.toLowerCase().includes(query);
+    item.classList.toggle("is-search-hidden", !matched);
+  });
+}
+
 function stopLogsFollow() {
   if (state.logsFollowTimer) {
     window.clearInterval(state.logsFollowTimer);
@@ -948,6 +968,10 @@ function handleAction(button) {
     "stack-status": "status",
   };
 
+  if (action === "toggle-sidebar") {
+    toggleSidebar();
+    return undefined;
+  }
   if (action === "toggle-user-info") {
     toggleUserInfo(button);
     return undefined;
@@ -1074,6 +1098,7 @@ bind("#log-filter", "input", () => {
 });
 
 bind("#logs-follow", "change", syncLogsFollow);
+bind("#global-search", "input", syncGlobalSearch);
 
 window.addEventListener("unhandledrejection", (event) => {
   pageError(errorText(event.reason));

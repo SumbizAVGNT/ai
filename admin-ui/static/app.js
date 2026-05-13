@@ -10,17 +10,19 @@ const state = {
   me: null,
   updateJobId: null,
   updatePollTimer: null,
+  logsFollowTimer: null,
+  lastLogsText: "",
 };
 
 const subtitles = {
-  overview: "Runtime state, services and quick controls.",
+  overview: "Runtime state, services and stack controls.",
   tokens: "API keys, limits and usage counters.",
   users: "Admin panel accounts.",
-  models: "Local models, downloads and uploads.",
-  settings: "Prompt injection and llama.cpp runtime args.",
-  clients: "Optional OpenAI-compatible client helpers.",
-  updates: "GitHub version checks and one-click update.",
-  logs: "Container logs.",
+  models: "Local GGUF models, downloads and uploads.",
+  settings: "Prompt and llama.cpp runtime args.",
+  clients: "OpenAI-compatible client helpers.",
+  updates: "GitHub version checks and update flow.",
+  logs: "Container logs with filter and follow mode.",
 };
 
 function apiPath(path) {
@@ -34,6 +36,30 @@ function formatBytes(value) {
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${n} B`;
+}
+
+function formatBytePair(used, total) {
+  const u = Number(used || 0);
+  const t = Number(total || 0);
+  if (!Number.isFinite(u) || !Number.isFinite(t) || t <= 0) return "-";
+  if (t >= 1024 ** 3) return `${(u / 1024 ** 3).toFixed(1)}/${(t / 1024 ** 3).toFixed(1)} GB`;
+  if (t >= 1024 ** 2) return `${(u / 1024 ** 2).toFixed(1)}/${(t / 1024 ** 2).toFixed(1)} MB`;
+  return `${formatBytes(u)}/${formatBytes(t)}`;
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Number(seconds || 0));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function shortValue(value, fallback = "-") {
+  const text = String(value || "").trim();
+  return text || fallback;
 }
 
 function escapeHtml(value) {
@@ -164,6 +190,7 @@ function showCommandOutput(title, result) {
 
 function setActiveTab(tab) {
   state.tab = tab;
+  if (tab !== "logs") stopLogsFollow();
   $$(".nav").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
   $$(".tab-panel").forEach((panel) => panel.classList.add("hidden"));
   $(`#tab-${tab}`).classList.remove("hidden");
@@ -224,15 +251,39 @@ async function loadSystem() {
   const memory = host.memory || {};
   const disk = host.disk || {};
   const metrics = data.llama_metrics || {};
+  const stack = data.stack || {};
 
   $("#metric-cpu").textContent = `${Math.round(Number(host.cpu_percent || 0))}%`;
-  $("#metric-ram").textContent = `${formatBytes(memory.used)} / ${formatBytes(memory.total)}`;
-  $("#metric-disk").textContent = `${formatBytes(disk.used)} / ${formatBytes(disk.total)}`;
+  $("#metric-ram").textContent = formatBytePair(memory.used, memory.total);
+  $("#metric-disk").textContent = formatBytePair(disk.used, disk.total);
   $("#metric-speed").textContent = metrics.avg_prompt_tokens_per_second
     ? `${Number(metrics.avg_prompt_tokens_per_second).toFixed(1)} tok/s`
     : "-";
+  $("#metric-eval-speed").textContent = metrics.avg_eval_tokens_per_second
+    ? `${Number(metrics.avg_eval_tokens_per_second).toFixed(1)} tok/s`
+    : "-";
+  $("#metric-uptime").textContent = formatDuration(host.uptime_seconds);
+  $("#hero-backend").textContent = `backend: ${shortValue(stack.backend, "cpu")}`;
+  $("#hero-model").textContent = `model: ${shortValue(stack.model_id || stack.model_path, "not selected")}`;
+  $("#hero-url").textContent = `url: ${shortValue(stack.public_base_url, window.location.origin)}`;
 
-  const containers = data.containers || [];
+  const preferred = [
+    "llama-server-coder",
+    "token-gateway",
+    "admin-ui",
+    "local-ai-nginx",
+    "postgres",
+    "local-ai-postgres",
+    "opencode-server",
+    "codex-runner",
+    "claude-code-proxy",
+    "local-ai-certbot",
+  ];
+  const containers = [...(data.containers || [])].sort((a, b) => {
+    const ai = preferred.indexOf(a.name);
+    const bi = preferred.indexOf(b.name);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi) || a.name.localeCompare(b.name);
+  });
   if (!containers.length) {
     renderEmpty("#containers-list", data.docker_error || "No containers found.");
     return;
@@ -240,16 +291,29 @@ async function loadSystem() {
 
   $("#containers-list").innerHTML = containers.map((container) => {
     const running = container.status === "running";
+    const health = container.health || "";
+    const healthBad = health === "unhealthy";
+    const statusClass = running && !healthBad ? "good" : (running ? "warn" : "bad");
     const stats = container.stats || {};
+    const canStop = running && container.name !== "admin-ui";
+    const canRestart = running && container.name !== "admin-ui";
+    const canStart = !running;
     return `
       <div class="list-row container-row">
         <div>
           <strong>${escapeHtml(container.name)}</strong>
           <small>${escapeHtml((container.image || []).join(", ") || "image")}</small>
         </div>
-        <span class="status ${running ? "good" : "bad"}">${escapeHtml(container.status)}</span>
+        <span class="status ${statusClass}">${escapeHtml(health || container.status)}</span>
         <span>CPU ${escapeHtml(stats.cpu_percent ?? 0)}%</span>
         <span>${formatBytes(stats.memory_usage)}</span>
+        <span>${running ? "online" : "offline"}</span>
+        <div class="container-actions">
+          <button class="secondary small" data-action="container-logs" data-service="${escapeHtml(container.name)}">Logs</button>
+          <button class="secondary small" data-action="container-start" data-container="${escapeHtml(container.name)}" ${canStart ? "" : "disabled"}>Start</button>
+          <button class="secondary small" data-action="container-restart" data-container="${escapeHtml(container.name)}" ${canRestart ? "" : "disabled"}>Restart</button>
+          <button class="danger small" data-action="container-stop" data-container="${escapeHtml(container.name)}" ${canStop ? "" : "disabled"}>Stop</button>
+        </div>
       </div>
     `;
   }).join("");
@@ -262,6 +326,26 @@ async function stackAction(action) {
     window.setTimeout(() => loadSystem().catch(() => {}), 1500);
   }
   return result;
+}
+
+async function containerAction(name, action) {
+  const result = await api(`/containers/${encodeURIComponent(name)}/${encodeURIComponent(action)}`, { method: "POST" });
+  showCommandOutput(`docker ${action} ${name}`, result);
+  window.setTimeout(() => loadSystem().catch(() => {}), 900);
+  return result;
+}
+
+async function openContainerLogs(service) {
+  setActiveTab("logs");
+  const select = $("#log-service");
+  if (![...select.options].some((option) => option.value === service)) {
+    const option = document.createElement("option");
+    option.value = service;
+    option.textContent = service;
+    select.appendChild(option);
+  }
+  select.value = service;
+  await loadLogs();
 }
 
 async function loadTokens() {
@@ -282,6 +366,7 @@ async function loadTokens() {
       <span>${escapeHtml(token.used_tokens ?? 0)} used</span>
       <span>${token.unlimited ? "unlimited" : `${escapeHtml(token.remaining_tokens ?? 0)} left`}</span>
       <div class="row-actions">
+        <button class="secondary small" data-action="token-copy" data-key="${escapeHtml(token.key)}">Copy</button>
         <button class="secondary small" data-action="token-toggle" data-key="${escapeHtml(token.key)}" data-enabled="${token.enabled}">
           ${token.enabled ? "Disable" : "Enable"}
         </button>
@@ -316,6 +401,22 @@ async function deleteToken(key) {
   if (!window.confirm("Delete this token?")) return;
   await api(`/tokens/${encodeURIComponent(key)}`, { method: "DELETE" });
   await loadTokens();
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  input.remove();
 }
 
 async function loadUsers() {
@@ -506,10 +607,35 @@ async function enableClient(client) {
   await loadClients();
 }
 
-async function loadLogs() {
+function stopLogsFollow() {
+  if (state.logsFollowTimer) {
+    window.clearInterval(state.logsFollowTimer);
+    state.logsFollowTimer = null;
+  }
+}
+
+function applyLogFilter(text) {
+  const query = $("#log-filter")?.value.trim().toLowerCase() || "";
+  if (!query) return text;
+  return text
+    .split("\n")
+    .filter((line) => line.toLowerCase().includes(query))
+    .join("\n");
+}
+
+function syncLogsFollow() {
+  stopLogsFollow();
+  if ($("#logs-follow")?.checked && state.tab === "logs") {
+    state.logsFollowTimer = window.setInterval(() => loadLogs({ silent: true }).catch(() => {}), 3500);
+  }
+}
+
+async function loadLogs(options = {}) {
   const service = $("#log-service").value;
   const data = await api(`/logs/${encodeURIComponent(service)}?tail=300`);
-  $("#logs-output").textContent = (data.stdout || "") + (data.stderr || "") || "No logs.";
+  state.lastLogsText = (data.stdout || "") + (data.stderr || "") || "No logs.";
+  $("#logs-output").textContent = applyLogFilter(state.lastLogsText);
+  if (!options.silent) syncLogsFollow();
 }
 
 function setUpdateState(kind, label) {
@@ -632,7 +758,14 @@ function handleAction(button) {
   if (action === "apply-update") return runAction(button, applyUpdate);
   if (action === "upload-model") return runAction(button, uploadModel, "Model uploaded");
   if (stackMap[action]) return runAction(button, () => stackAction(stackMap[action]), `Stack ${stackMap[action]} finished`);
+  if (action === "container-logs") return runAction(button, () => openContainerLogs(button.dataset.service));
+  if (action === "container-start") return runAction(button, () => containerAction(button.dataset.container, "start"), "Container started");
+  if (action === "container-stop") return runAction(button, () => containerAction(button.dataset.container, "stop"), "Container stopped");
+  if (action === "container-restart") return runAction(button, () => containerAction(button.dataset.container, "restart"), "Container restarted");
 
+  if (action === "token-copy") {
+    return runAction(button, () => copyText(button.dataset.key), "Token copied");
+  }
   if (action === "token-toggle") {
     return runAction(button, () => patchToken(button.dataset.key, { enabled: button.dataset.enabled !== "true" }), "Token updated");
   }
@@ -720,6 +853,12 @@ $("#logs-form").addEventListener("submit", (event) => {
   event.preventDefault();
   runAction($("#logs-form button[type='submit']"), loadLogs, "Logs loaded").catch(() => {});
 });
+
+$("#log-filter").addEventListener("input", () => {
+  $("#logs-output").textContent = applyLogFilter(state.lastLogsText);
+});
+
+$("#logs-follow").addEventListener("change", syncLogsFollow);
 
 window.addEventListener("unhandledrejection", (event) => {
   pageError(errorText(event.reason));

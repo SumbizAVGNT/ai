@@ -3,17 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Local AI Stack Admin</title>
-  <link rel="stylesheet" href="static/style.css?v=5">
+  <title>Local AI Stack Sakura Admin</title>
+  <link rel="stylesheet" href="static/style.css?v=6">
 </head>
 <body>
   <div id="toast" class="toast hidden"></div>
+  <div class="scene-decor" aria-hidden="true">
+    <span class="petal-field"></span>
+    <span class="circuit-corner left"></span>
+    <span class="circuit-corner right"></span>
+  </div>
 
   <section id="login-view" class="login-view hidden">
     <form id="login-form" class="login-panel" autocomplete="on">
+      <img class="login-mascot" src="static/assets/anime/characters_transparent/chibi_catgirl_sitting_transparent.png" alt="">
       <div class="logo">AI</div>
-      <h1>Local AI Stack</h1>
-      <p class="muted">Admin panel</p>
+      <h1>Sakura Admin</h1>
+      <p class="muted">Local AI Stack</p>
       <label>
         <span>Login</span>
         <input id="login-user" name="username" value="admin" autocomplete="username" required>
@@ -30,22 +36,22 @@
   <section id="app-view" class="app hidden">
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark"></span>
+        <img class="brand-avatar" src="static/assets/anime/avatars_transparent/avatar_dark_admin_transparent.png" alt="">
         <div>
-          <strong>AI Admin</strong>
-          <small>Local stack</small>
+          <strong>Sakura AI</strong>
+          <small>Admin deck</small>
         </div>
       </div>
 
       <nav class="nav-list" aria-label="Admin sections">
-        <button class="nav active" data-tab="overview">Overview</button>
-        <button class="nav" data-tab="tokens">Tokens</button>
-        <button class="nav" data-tab="users">Users</button>
-        <button class="nav" data-tab="models">Models</button>
-        <button class="nav" data-tab="settings">Llama & Prompt</button>
-        <button class="nav" data-tab="clients">Clients</button>
-        <button class="nav" data-tab="updates">Updates <span id="update-dot" class="dot hidden"></span></button>
-        <button class="nav" data-tab="logs">Logs</button>
+        <button class="nav active" data-tab="overview"><span>Overview</span></button>
+        <button class="nav" data-tab="tokens"><span>Tokens</span></button>
+        <button class="nav" data-tab="users"><span>Users</span></button>
+        <button class="nav" data-tab="models"><span>Models</span></button>
+        <button class="nav" data-tab="settings"><span>Llama & Prompt</span></button>
+        <button class="nav" data-tab="clients"><span>Clients</span></button>
+        <button class="nav" data-tab="updates"><span>Updates</span><span id="update-dot" class="dot hidden"></span></button>
+        <button class="nav" data-tab="logs"><span>Logs</span></button>
       </nav>
 
       <div class="side-actions">
@@ -61,17 +67,32 @@
           <h2 id="page-title">Overview</h2>
           <p id="page-subtitle" class="muted">Runtime state, services and quick controls.</p>
         </div>
-        <div class="user-pill" id="user-pill">admin</div>
+        <div class="user-pill"><span id="user-pill">admin</span></div>
       </header>
 
       <div id="page-alert" class="page-alert hidden"></div>
 
       <section id="tab-overview" class="tab-panel">
+        <section class="hero-panel">
+          <div class="hero-copy">
+            <span class="eyebrow">Sakura Command Center</span>
+            <h1>Local AI Stack</h1>
+            <div class="hero-meta">
+              <span id="hero-backend">backend: ...</span>
+              <span id="hero-model">model: ...</span>
+              <span id="hero-url">url: ...</span>
+            </div>
+          </div>
+          <img class="hero-character" src="static/assets/anime/characters_transparent/chibi_catgirl_sitting_transparent.png" alt="">
+        </section>
+
         <div class="metrics">
           <div class="metric"><span>CPU</span><strong id="metric-cpu">...</strong></div>
           <div class="metric"><span>RAM</span><strong id="metric-ram">...</strong></div>
           <div class="metric"><span>Disk</span><strong id="metric-disk">...</strong></div>
           <div class="metric"><span>Prompt speed</span><strong id="metric-speed">...</strong></div>
+          <div class="metric"><span>Eval speed</span><strong id="metric-eval-speed">...</strong></div>
+          <div class="metric"><span>Uptime</span><strong id="metric-uptime">...</strong></div>
         </div>
 
         <div class="split">
@@ -226,7 +247,15 @@
               <option>token-gateway</option>
               <option>llama-server-coder</option>
               <option>postgres</option>
+              <option>local-ai-postgres</option>
+              <option>opencode-server</option>
+              <option>codex-runner</option>
+              <option>claude-code-proxy</option>
+              <option>certbot</option>
+              <option>local-ai-certbot</option>
             </select>
+            <input id="log-filter" placeholder="Filter logs">
+            <label class="check"><input id="logs-follow" type="checkbox"> Follow</label>
             <button type="submit">Load logs</button>
           </form>
           <pre id="logs-output" class="logs"></pre>
@@ -235,6 +264,6 @@
     </main>
   </section>
 
-  <script src="static/app.js?v=5"></script>
+  <script src="static/app.js?v=6"></script>
 </body>
 </html>

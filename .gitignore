@@ -14,6 +14,7 @@ models/
 opencode-config/
 postgres/
 projects/
+anime_admin_site_assets_v2/
 
 __pycache__/
 *.py[cod]

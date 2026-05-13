@@ -48,6 +48,34 @@ app = FastAPI(title="Local AI Stack Admin", version="3.2.0")
 app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 app.mount("/ui/static", StaticFiles(directory=str(APP_DIR / "static")), name="ui-static")
 jobs: dict[str, dict[str, Any]] = {}
+KNOWN_CONTAINERS = {
+    "llama-server-coder",
+    "token-gateway",
+    "local-ai-nginx",
+    "nginx",
+    "local-ai-certbot",
+    "certbot",
+    "admin-ui",
+    "local-ai-postgres",
+    "opencode-server",
+    "codex-runner",
+    "claude-code-proxy",
+    "postgres",
+}
+COMPOSE_LOG_SERVICES = {
+    "admin-ui": "admin-ui",
+    "nginx": "nginx",
+    "local-ai-nginx": "nginx",
+    "token-gateway": "token-gateway",
+    "llama-server-coder": "llama-server-coder",
+    "postgres": "postgres",
+    "local-ai-postgres": "postgres",
+    "opencode-server": "opencode-server",
+    "codex-runner": "codex-runner",
+    "claude-code-proxy": "claude-code-proxy",
+    "local-ai-certbot": "certbot",
+    "certbot": "certbot",
+}
 
 
 @app.middleware("http")
@@ -836,16 +864,54 @@ def parse_llama_logs() -> dict:
 
 @app.get("/api/system")
 def api_system(_: User = Depends(current_user)):
-    result: dict[str, Any] = {"host": {"cpu_percent": psutil.cpu_percent(interval=0.2), "memory": psutil.virtual_memory()._asdict(), "disk": psutil.disk_usage("/")._asdict(), "boot_time": psutil.boot_time()}, "containers": [], "llama_metrics": parse_llama_logs()}
+    env = env_parse()
+    result: dict[str, Any] = {
+        "host": {
+            "cpu_percent": psutil.cpu_percent(interval=0.2),
+            "memory": psutil.virtual_memory()._asdict(),
+            "disk": psutil.disk_usage("/")._asdict(),
+            "boot_time": psutil.boot_time(),
+            "uptime_seconds": max(0, int(time.time() - psutil.boot_time())),
+        },
+        "stack": {
+            "backend": env.get("BACKEND", "cpu"),
+            "model_id": env.get("MODEL_ID", ""),
+            "model_path": env.get("MODEL_PATH", ""),
+            "domain": DOMAIN,
+            "public_base_url": PUBLIC_BASE_URL,
+        },
+        "containers": [],
+        "llama_metrics": parse_llama_logs(),
+    }
     try:
-        client = docker.from_env(); known = {"llama-server-coder", "token-gateway", "local-ai-nginx", "local-ai-certbot", "admin-ui", "local-ai-postgres", "opencode-server", "codex-runner", "claude-code-proxy", "postgres"}
+        client = docker.from_env()
         for c in client.containers.list(all=True):
-            if c.name not in known: continue
+            if c.name not in KNOWN_CONTAINERS:
+                continue
             stats = docker_stats_summary(c.stats(stream=False)) if c.status == "running" else {}
-            result["containers"].append({"name": c.name, "status": c.status, "image": c.image.tags, "stats": stats})
+            state = c.attrs.get("State", {}) if isinstance(c.attrs, dict) else {}
+            health = state.get("Health", {}).get("Status", "")
+            result["containers"].append({
+                "name": c.name,
+                "status": c.status,
+                "health": health,
+                "image": c.image.tags,
+                "stats": stats,
+                "created": c.attrs.get("Created", "") if isinstance(c.attrs, dict) else "",
+            })
     except Exception as e:
         result["docker_error"] = str(e)
     return result
+
+@app.post("/api/containers/{name}/{action}")
+def api_container_action(name: str, action: str, _: User = Depends(current_user)):
+    if name not in KNOWN_CONTAINERS:
+        raise HTTPException(status_code=400, detail="unknown container")
+    if action not in {"start", "stop", "restart"}:
+        raise HTTPException(status_code=400, detail="unknown action")
+    if name == "admin-ui" and action in {"stop", "restart"}:
+        raise HTTPException(status_code=400, detail="admin-ui cannot stop or restart itself from this panel")
+    return run_docker([action, name], timeout=90)
 
 @app.post("/api/stack/{action}")
 def api_stack_action(action: str, _: User = Depends(current_user)):
@@ -875,9 +941,9 @@ def api_update_job(job_id: str, _: User = Depends(current_user)):
 
 @app.get("/api/logs/{service}")
 def api_logs(service: str, tail: int = 200, _: User = Depends(current_user)):
-    allowed = {"llama-server-coder", "token-gateway", "local-ai-nginx", "nginx", "admin-ui", "postgres"}
-    if service not in allowed: raise HTTPException(status_code=400, detail="unsupported service")
-    real = "nginx" if service == "local-ai-nginx" else service
+    real = COMPOSE_LOG_SERVICES.get(service)
+    if not real:
+        raise HTTPException(status_code=400, detail="unsupported service")
     return run_compose(["logs", f"--tail={int(tail)}", real], timeout=15)
 
 @app.get("/api/models")
